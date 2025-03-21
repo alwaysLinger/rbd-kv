@@ -8,6 +8,7 @@ import (
 	"time"
 
 	nerr "github.com/alwaysLinger/rbkv/error"
+	"github.com/alwaysLinger/rbkv/internal/meta"
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/dgraph-io/badger/v4"
 	badgerpb "github.com/dgraph-io/badger/v4/pb"
@@ -51,13 +52,14 @@ type Observer interface {
 }
 
 type Node struct {
+	id         string
 	fsm        *FSM
 	raft       *raft.Raft
 	opts       *storeOptions
 	dispatcher *eventDispatcher
 	obCh       chan raft.Observation
 
-	mu             *sync.RWMutex
+	mu             *sync.Mutex
 	kvConn         grpc.ClientConnInterface
 	kvLeaderClient pb.RbdkvClient
 }
@@ -86,22 +88,37 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
 				valCh <- val
 			}
 		} else {
-			committedIndex, staleTerm := n.raft.CommitIndex(), n.raft.CurrentTerm()
-			_, staleLeaderID := n.raft.LeaderWithID()
-			<-n.fsm.WaitForIndexAlign(committedIndex)
-			val, err := n.get(cmd.Key)
-			if err != nil {
+			if _, id, _, err := n.LeaderInfo(); err != nil {
 				errCh <- err
 			} else {
-				currentTerm := n.raft.CurrentTerm()
-				_, currentLeaderID := n.raft.LeaderWithID()
-				if staleTerm == currentTerm && staleLeaderID == currentLeaderID {
-					valCh <- val
+				if n.isLeader(id) {
+					staleTerm := n.raft.CurrentTerm()
+					switch v := n.propose(ctx, cmd).(type) {
+					case []byte:
+						if _, id, term, err := n.LeaderInfo(); err != nil {
+							errCh <- err
+						} else {
+							if n.isLeader(id) && staleTerm == term {
+								valCh <- v
+							} else {
+								if addr, id, term, err := n.LeaderInfo(); err != nil {
+									errCh <- err
+								} else {
+									errCh <- nerr.NewNodeError(ErrLeaderShipChanged, addr, id, term)
+								}
+							}
+						}
+					case error:
+						errCh <- v
+					default:
+						valCh <- v
+					}
 				} else {
-					if addr, id, term, err := n.LeaderInfo(); err != nil {
+					resp, err := n.forwardToLeader(ctx, cmd)
+					if err != nil {
 						errCh <- err
 					} else {
-						errCh <- nerr.NewNodeError(ErrLeaderShipChanged, addr, id, term)
+						valCh <- resp.Value
 					}
 				}
 			}
@@ -112,14 +129,42 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case val := <-valCh:
-		if val, ok := val.([]byte); ok {
-			return val, nil
-		} else {
-			return nil, fmt.Errorf("unexpected get value: %v", val)
+		switch v := val.(type) {
+		case []byte:
+			return v, nil
+		case error:
+			return nil, v
+		default:
+			return nil, fmt.Errorf("unexpected get value: %v", v)
 		}
 	case err := <-errCh:
 		return nil, err
 	}
+}
+
+func (n *Node) isLeader(id string) bool {
+	return n.id == id
+}
+
+func (n *Node) forwardToLeader(ctx context.Context, cmd *pb.Command) (*pb.CommandResponse, error) {
+	rctx, err := meta.RedirectCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.kvLeaderClient == nil {
+		if _, id, _, err := n.LeaderInfo(); err != nil {
+			return nil, err
+		} else {
+			if err := n.setKVConn(id); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return n.kvLeaderClient.Execute(rctx, cmd)
 }
 
 func (n *Node) get(key []byte) ([]byte, error) {
@@ -146,14 +191,40 @@ func (n *Node) get(key []byte) ([]byte, error) {
 }
 
 func (n *Node) Put(ctx context.Context, cmd *pb.Command) error {
-	return n.propose(ctx, cmd)
+	if _, id, _, err := n.LeaderInfo(); err != nil {
+		return err
+	} else {
+		if n.isLeader(id) {
+			if err, ok := n.propose(ctx, cmd).(error); ok {
+				return err
+			}
+			return nil
+		}
+		if _, err := n.forwardToLeader(ctx, cmd); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 func (n *Node) Delete(ctx context.Context, cmd *pb.Command) error {
-	return n.propose(ctx, cmd)
+	if _, id, _, err := n.LeaderInfo(); err != nil {
+		return err
+	} else {
+		if n.isLeader(id) {
+			if err, ok := n.propose(ctx, cmd).(error); ok {
+				return err
+			}
+			return nil
+		}
+		if _, err := n.forwardToLeader(ctx, cmd); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
-func (n *Node) propose(ctx context.Context, cmd *pb.Command) error {
+func (n *Node) propose(ctx context.Context, cmd *pb.Command) any {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, n.opts.WriteTimeout)
@@ -182,11 +253,7 @@ func (n *Node) propose(ctx context.Context, cmd *pb.Command) error {
 		return af.Error()
 	}
 
-	if err, ok := af.Response().(error); ok {
-		return err
-	} else {
-		return nil
-	}
+	return af.Response()
 }
 
 func durationFromCtx(ctx context.Context) (time.Duration, error) {
@@ -344,17 +411,11 @@ func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
 }
 
 func (n *Node) Open() error {
-	_, addr := n.raft.LeaderWithID()
-	n.setKVConn(addr)
-
-	go func() {
-		for {
-			time.Sleep(10 * time.Millisecond)
-			ai := n.raft.AppliedIndex()
-			n.fsm.SyncAppliedIndex(ai)
+	if _, id, _, err := n.LeaderInfo(); err == nil {
+		if err := n.setKVConn(id); err != nil {
+			return err
 		}
-	}()
-
+	}
 	return nil
 }
 
@@ -370,22 +431,25 @@ func (n *Node) WithRaft(r *raft.Raft) {
 	n.raft = r
 }
 
-func (n *Node) setKVConn(addr raft.ServerID) {
+func (n *Node) setKVConn(addr string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if conn, err := grpc.Dial(string(addr), grpc.WithInsecure(), grpc.WithBlock()); err != nil {
+	if conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(1*time.Second)); err != nil {
 		if n.kvConn != nil {
 			if c, ok := n.kvConn.(*grpc.ClientConn); ok {
 				_ = c.Close()
 			}
 		}
-		n.kvLeaderClient = pb.NewRbdkvClient(conn)
-	} else {
 		n.kvConn, n.kvLeaderClient = nil, nil
+		return err
+	} else {
+		n.kvConn = conn
+		n.kvLeaderClient = pb.NewRbdkvClient(conn)
+		return nil
 	}
 }
 
-func NewStore(fsm *FSM) *Node {
+func NewNode(fsm *FSM, id string) *Node {
 	dispatcher := newEventDispatcher(fsm)
 	opts := &storeOptions{
 		ReadTimeout:  2000 * time.Millisecond,
@@ -393,16 +457,17 @@ func NewStore(fsm *FSM) *Node {
 	}
 	obCh := make(chan raft.Observation, 100)
 	n := &Node{
+		id:         id,
 		fsm:        fsm,
 		opts:       opts,
 		dispatcher: dispatcher,
 		obCh:       obCh,
-		mu:         new(sync.RWMutex),
+		mu:         new(sync.Mutex),
 	}
 	go func() {
 		for ob := range obCh {
 			if e, ok := ob.Data.(raft.LeaderObservation); ok {
-				n.setKVConn(e.LeaderID)
+				_ = n.setKVConn(string(e.LeaderID))
 			}
 		}
 	}()

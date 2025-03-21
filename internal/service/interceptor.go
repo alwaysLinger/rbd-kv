@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	nerr "github.com/alwaysLinger/rbkv/error"
+	"github.com/alwaysLinger/rbkv/internal/meta"
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -68,5 +69,18 @@ func errServerStreamInterceptor() grpc.StreamServerInterceptor {
 		}
 
 		return nil
+	}
+}
+
+func redirectServerUnaryInterceptor(redirectLimit int) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		times, err := meta.RedirectTimes(ctx)
+		if err != nil {
+			return nil, status.Errorf(codes.Aborted, "extract redirect times failed: %v", err)
+		}
+		if times > redirectLimit {
+			return nil, status.Errorf(codes.Aborted, "limit of redirect has been reached")
+		}
+		return handler(ctx, req)
 	}
 }

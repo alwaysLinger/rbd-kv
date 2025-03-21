@@ -9,7 +9,6 @@ import (
 	"github.com/alwaysLinger/rbkv/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
 
@@ -89,11 +88,10 @@ func (s *KVService) Run(addr string) error {
 		return err
 	}
 	s.server = grpc.NewServer(
-		grpc.UnaryInterceptor(errServerUnaryInterceptor()),
+		grpc.ChainUnaryInterceptor(redirectServerUnaryInterceptor(1), errServerUnaryInterceptor()),
 		grpc.StreamInterceptor(errServerStreamInterceptor()),
 	)
 	pb.RegisterRbdkvServer(s.server, s)
-	reflection.Register(s.server)
 	if err := s.server.Serve(lis); err != nil {
 		fmt.Printf("kv server stopped: %v\n", err)
 		return err

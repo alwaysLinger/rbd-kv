@@ -1,9 +1,9 @@
 package store
 
 import (
+	"errors"
 	"io"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/alwaysLinger/rbkv/pb"
@@ -17,16 +17,14 @@ const (
 	restoreGoNum = 16
 )
 
+var ErrNotFound = errors.New("key not found")
+
 type applyFunc func(log *raft.Log) interface{}
 
 type FSM struct {
 	db *badger.DB
 	applyFunc
 	gcTicker *time.Ticker
-
-	mu                *sync.Mutex
-	appliedCond       *sync.Cond
-	localAppliedIndex uint64
 }
 
 func OpenFSM(dir string, opts *badger.Options, applyLog applyFunc) (*FSM, error) {
@@ -40,8 +38,6 @@ func OpenFSM(dir string, opts *badger.Options, applyLog applyFunc) (*FSM, error)
 	}
 
 	s := new(FSM)
-	s.mu = new(sync.Mutex)
-	s.appliedCond = sync.NewCond(s.mu)
 
 	db, err := badger.Open(*opts)
 	if err != nil {
@@ -91,6 +87,29 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 		return err
 	}
 
+	if cmd.Op == pb.Command_Get {
+		var val []byte
+		err := s.db.View(func(txn *badger.Txn) error {
+			if item, err := txn.Get(cmd.Key); err != nil {
+				if errors.Is(err, badger.ErrKeyNotFound) {
+					return ErrNotFound
+				}
+				return err
+			} else {
+				if val, err = item.ValueCopy(val); err != nil {
+					return err
+				} else {
+					return nil
+				}
+			}
+		})
+		if err != nil {
+			return err
+		} else {
+			return val
+		}
+	}
+
 	err = s.db.Update(func(txn *badger.Txn) error {
 		if cmd.Op == pb.Command_Put {
 			ent := badger.NewEntry(cmd.Key, cmd.Value)
@@ -115,47 +134,7 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 		return err
 	}
 
-	s.updateAppliedIndex(log.Index)
-
 	return nil
-}
-
-func (s *FSM) updateAppliedIndex(index uint64) {
-	s.mu.Lock()
-	if s.localAppliedIndex < index {
-		s.localAppliedIndex = index
-		s.appliedCond.Broadcast()
-	}
-	s.mu.Unlock()
-}
-
-func (s *FSM) SyncAppliedIndex(index uint64) {
-	s.updateAppliedIndex(index)
-}
-
-func (s *FSM) appliedIndex() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.localAppliedIndex
-}
-
-func (s *FSM) WaitForIndexAlign(index uint64) <-chan struct{} {
-	ch := make(chan struct{}, 1)
-
-	go func() {
-		if s.appliedIndex() >= index {
-			ch <- struct{}{}
-		}
-
-		s.appliedCond.L.Lock()
-		for s.localAppliedIndex < index {
-			s.appliedCond.Wait()
-		}
-		s.appliedCond.L.Unlock()
-		ch <- struct{}{}
-	}()
-
-	return ch
 }
 
 func (s *FSM) Snapshot() (raft.FSMSnapshot, error) {

@@ -51,7 +51,7 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, err
 	}
 
-	n := storage.NewStore(fsm)
+	n := storage.NewNode(fsm, opts.NodeID)
 	r, err := newRaft(opts.RaftAddr, opts.NodeID, opts.LogDir, opts.JoinAddr, fsm, n.ObChan())
 	if err != nil {
 		return nil, err
