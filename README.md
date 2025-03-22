@@ -2,7 +2,7 @@
 
 ## BadgerDB as Hashicorp/Raft FSM Implementation
 
-This repository implements Hashicorp/Raft's FSM interface using BadgerDB as the underlying storage engine. BadgerDB was
+This repository implements [hashicorp/raft](https://github.com/hashicorp/raft)'s FSM interface using [BadgerDB](https://github.com/dgraph-io/badger) as the underlying storage engine. BadgerDB was
 chosen for its combination of high performance and ease of implementation, making it an ideal choice for an FSM
 implementation.
 
@@ -19,7 +19,7 @@ implementation.
 1. Strong consistency with Raft consensus protocol
 2. Serializable and linearizable read
 3. Watch mechanism for key events
-4. SSD design friendly, FSM storage size unlimited, thanks to BadgerDB
+4. SSD design friendly, FSM storage size unlimited, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
 
 ## Why?
 
