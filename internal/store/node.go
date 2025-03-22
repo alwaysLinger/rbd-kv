@@ -27,6 +27,8 @@ var (
 	ErrWatcherIDConflict     = errors.New("watcher already exists")
 	ErrWatcherConsumeTooSlow = errors.New("watcher consume too slow")
 	ErrWatcherClosed         = errors.New("watcher closed")
+
+	ErrLeaderConnChanged = errors.New("leader changed while forward cmd to leader")
 )
 
 type Store interface {
@@ -59,7 +61,7 @@ type Node struct {
 	dispatcher *eventDispatcher
 	obCh       chan raft.Observation
 
-	mu             *sync.Mutex
+	mu             *sync.RWMutex
 	kvConn         grpc.ClientConnInterface
 	kvLeaderClient pb.RbdkvClient
 }
@@ -152,19 +154,26 @@ func (n *Node) forwardToLeader(ctx context.Context, cmd *pb.Command) (*pb.Comman
 		return nil, err
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.kvLeaderClient == nil {
-		if _, id, _, err := n.LeaderInfo(); err != nil {
+	n.mu.RLock()
+	c := n.kvLeaderClient
+	n.mu.RUnlock()
+	if c == nil {
+		_, id, _, err := n.LeaderInfo()
+		if err != nil {
 			return nil, err
-		} else {
-			if err := n.setKVConn(id); err != nil {
-				return nil, err
-			}
+		}
+		if err := n.setKVConn(id); err != nil {
+			return nil, err
+		}
+		n.mu.RLock()
+		c = n.kvLeaderClient
+		n.mu.RUnlock()
+		if c == nil {
+			return nil, ErrLeaderConnChanged
 		}
 	}
 
-	return n.kvLeaderClient.Execute(rctx, cmd)
+	return c.Execute(rctx, cmd)
 }
 
 func (n *Node) get(key []byte) ([]byte, error) {
@@ -432,21 +441,30 @@ func (n *Node) WithRaft(r *raft.Raft) {
 }
 
 func (n *Node) setKVConn(addr string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(1*time.Second)); err != nil {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
+	if err != nil {
+		n.mu.Lock()
 		if n.kvConn != nil {
 			if c, ok := n.kvConn.(*grpc.ClientConn); ok {
 				_ = c.Close()
 			}
 		}
 		n.kvConn, n.kvLeaderClient = nil, nil
+		n.mu.Unlock()
 		return err
-	} else {
-		n.kvConn = conn
-		n.kvLeaderClient = pb.NewRbdkvClient(conn)
-		return nil
 	}
+
+	n.mu.Lock()
+	if n.kvConn != nil {
+		if c, ok := n.kvConn.(*grpc.ClientConn); ok {
+			_ = c.Close()
+		}
+	}
+	n.kvConn = conn
+	n.kvLeaderClient = pb.NewRbdkvClient(conn)
+	n.mu.Unlock()
+
+	return nil
 }
 
 func NewNode(fsm *FSM, id string) *Node {
@@ -462,7 +480,7 @@ func NewNode(fsm *FSM, id string) *Node {
 		opts:       opts,
 		dispatcher: dispatcher,
 		obCh:       obCh,
-		mu:         new(sync.Mutex),
+		mu:         new(sync.RWMutex),
 	}
 	go func() {
 		for ob := range obCh {
