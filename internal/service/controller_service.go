@@ -8,7 +8,6 @@ import (
 	"github.com/alwaysLinger/rbkv/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
 
@@ -46,7 +45,6 @@ func (s *ControllerService) Run(addr string) error {
 
 	s.server = grpc.NewServer(grpc.UnaryInterceptor(errServerUnaryInterceptor()))
 	pb.RegisterControllerServer(s.server, s)
-	reflection.Register(s.server)
 	if err := s.server.Serve(lis); err != nil {
 		fmt.Printf("controller server stopped: %v\n", err)
 		return err
