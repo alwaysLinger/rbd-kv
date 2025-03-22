@@ -6,8 +6,11 @@ option go_package = "github.com/alwaysLinger/rbd-kv/pb";
 
 service Rbdkv {
   rpc Execute(Command) returns (CommandResponse) {}
-  rpc LeaderInfo(LeaderRequest) returns (LeaderInfoResponse) {}
   rpc Watch(WatchRequest) returns (stream WatchResponse) {}
+  rpc LeaderInfo(LeaderRequest) returns (LeaderInfoResponse) {}
+  // todo raft raft wal fsm stats
+  // rpc ClusterStats(ClusterStatsRequest) returns (ClusterStatsResponse) {}
+  // todo move Join method here
 }
 
 service Controller {

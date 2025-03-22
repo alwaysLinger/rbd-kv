@@ -14,9 +14,23 @@ implementation.
 3. **Comprehensive Snapshot Support**: Built-in backup and restore functionalities make FSM implementation
    straightforward
 
+## Features
+
+1. Strong consistency with Raft consensus protocol
+2. Serializable and linearizable read
+3. Watch mechanism for key events
+4. SSD design friendly, FSM storage size unlimited, thanks to BadgerDB
+
 ## Why?
 
 One of my application uses memory as a level2 cache, so I needed a general-purpose level1 cache similar to Redis (
 though
 performance doesn't need to match Redis since most requests don't access the database). However, I required better
 consistency and reliable KV storage, which led to the creation of this project.
+
+## TODO
+
+1. Support transaction
+2. Smarter client
+3. Cmdline tool
+
