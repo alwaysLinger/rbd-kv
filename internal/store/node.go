@@ -553,7 +553,7 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
 		var recoverable bool
 		var err error
 		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
-			log.Printf("%w, current node self recovery may fail, try bootstrap the cluster", err)
+			log.Printf("%v, current node self recovery may fail, try bootstrap the cluster", err)
 			recoverable = true
 		}
 		if recoverable && err == nil {
@@ -574,7 +574,7 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
 		var recoverable bool
 		var err error
 		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
-			log.Printf("%w, current node self recovery may fail, try join the cluster", err)
+			log.Printf("%v, current node self recovery may fail, try join the cluster", err)
 			recoverable = true
 		}
 		if recoverable && err == nil {
