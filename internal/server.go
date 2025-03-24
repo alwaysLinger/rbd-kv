@@ -51,7 +51,7 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, err
 	}
 
-	n := storage.NewNode(fsm, opts.NodeID)
+	n := storage.NewNode(opts.NodeID, fsm)
 	r, err := newRaft(opts.RaftAddr, opts.NodeID, opts.LogDir, opts.JoinAddr, fsm, n.ObChan())
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func NewServer(opts *Options) (*Server, error) {
 }
 
 func checkOpts(opts *Options) error {
-	if (opts.AdvAddr == "" && opts.JoinAddr == "") || (len(opts.AdvAddr) != 0 && len(opts.JoinAddr) != 0) {
+	if (len(opts.AdvAddr) == 0 && len(opts.JoinAddr) == 0) || (len(opts.AdvAddr) != 0 && len(opts.JoinAddr) != 0) {
 		return fmt.Errorf("%w:advertise-addr and join-addr should not be set together, nor should they be set simultaneously", ErrOptsCheckFailed)
 	}
 	if len(opts.RaftAddr) == 0 {
@@ -166,7 +166,7 @@ func newRaft(addr, nodeID, dir, joinAddr string, fsm raft.FSM, obCh chan raft.Ob
 	}
 	r.RegisterObserver(observer)
 
-	if joinAddr == "" {
+	if len(joinAddr) == 0 {
 		conf := raft.Configuration{
 			Servers: []raft.Server{
 				{

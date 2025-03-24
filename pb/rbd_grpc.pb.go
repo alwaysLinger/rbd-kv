@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Rbdkv_Execute_FullMethodName    = "/rbdkv.Rbdkv/Execute"
-	Rbdkv_LeaderInfo_FullMethodName = "/rbdkv.Rbdkv/LeaderInfo"
-	Rbdkv_Watch_FullMethodName      = "/rbdkv.Rbdkv/Watch"
+	Rbdkv_Execute_FullMethodName      = "/rbdkv.Rbdkv/Execute"
+	Rbdkv_Watch_FullMethodName        = "/rbdkv.Rbdkv/Watch"
+	Rbdkv_LeaderInfo_FullMethodName   = "/rbdkv.Rbdkv/LeaderInfo"
+	Rbdkv_ClusterStats_FullMethodName = "/rbdkv.Rbdkv/ClusterStats"
 )
 
 // RbdkvClient is the client API for Rbdkv service.
@@ -29,8 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RbdkvClient interface {
 	Execute(ctx context.Context, in *Command, opts ...grpc.CallOption) (*CommandResponse, error)
-	LeaderInfo(ctx context.Context, in *LeaderRequest, opts ...grpc.CallOption) (*LeaderInfoResponse, error)
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
+	LeaderInfo(ctx context.Context, in *LeaderRequest, opts ...grpc.CallOption) (*LeaderInfoResponse, error)
+	ClusterStats(ctx context.Context, in *ClusterStatsRequest, opts ...grpc.CallOption) (*ClusterStatsResponse, error)
 }
 
 type rbdkvClient struct {
@@ -45,16 +47,6 @@ func (c *rbdkvClient) Execute(ctx context.Context, in *Command, opts ...grpc.Cal
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CommandResponse)
 	err := c.cc.Invoke(ctx, Rbdkv_Execute_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *rbdkvClient) LeaderInfo(ctx context.Context, in *LeaderRequest, opts ...grpc.CallOption) (*LeaderInfoResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(LeaderInfoResponse)
-	err := c.cc.Invoke(ctx, Rbdkv_LeaderInfo_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +72,34 @@ func (c *rbdkvClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Rbdkv_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
+func (c *rbdkvClient) LeaderInfo(ctx context.Context, in *LeaderRequest, opts ...grpc.CallOption) (*LeaderInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaderInfoResponse)
+	err := c.cc.Invoke(ctx, Rbdkv_LeaderInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rbdkvClient) ClusterStats(ctx context.Context, in *ClusterStatsRequest, opts ...grpc.CallOption) (*ClusterStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClusterStatsResponse)
+	err := c.cc.Invoke(ctx, Rbdkv_ClusterStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RbdkvServer is the server API for Rbdkv service.
 // All implementations must embed UnimplementedRbdkvServer
 // for forward compatibility.
 type RbdkvServer interface {
 	Execute(context.Context, *Command) (*CommandResponse, error)
-	LeaderInfo(context.Context, *LeaderRequest) (*LeaderInfoResponse, error)
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
+	LeaderInfo(context.Context, *LeaderRequest) (*LeaderInfoResponse, error)
+	ClusterStats(context.Context, *ClusterStatsRequest) (*ClusterStatsResponse, error)
 	mustEmbedUnimplementedRbdkvServer()
 }
 
@@ -100,11 +113,14 @@ type UnimplementedRbdkvServer struct{}
 func (UnimplementedRbdkvServer) Execute(context.Context, *Command) (*CommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Execute not implemented")
 }
+func (UnimplementedRbdkvServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
+}
 func (UnimplementedRbdkvServer) LeaderInfo(context.Context, *LeaderRequest) (*LeaderInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LeaderInfo not implemented")
 }
-func (UnimplementedRbdkvServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
+func (UnimplementedRbdkvServer) ClusterStats(context.Context, *ClusterStatsRequest) (*ClusterStatsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClusterStats not implemented")
 }
 func (UnimplementedRbdkvServer) mustEmbedUnimplementedRbdkvServer() {}
 func (UnimplementedRbdkvServer) testEmbeddedByValue()               {}
@@ -145,6 +161,17 @@ func _Rbdkv_Execute_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Rbdkv_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(RbdkvServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Rbdkv_WatchServer = grpc.ServerStreamingServer[WatchResponse]
+
 func _Rbdkv_LeaderInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LeaderRequest)
 	if err := dec(in); err != nil {
@@ -163,16 +190,23 @@ func _Rbdkv_LeaderInfo_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Rbdkv_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(WatchRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
+func _Rbdkv_ClusterStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
 	}
-	return srv.(RbdkvServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
+	if interceptor == nil {
+		return srv.(RbdkvServer).ClusterStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Rbdkv_ClusterStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RbdkvServer).ClusterStats(ctx, req.(*ClusterStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Rbdkv_WatchServer = grpc.ServerStreamingServer[WatchResponse]
 
 // Rbdkv_ServiceDesc is the grpc.ServiceDesc for Rbdkv service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -188,6 +222,10 @@ var Rbdkv_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LeaderInfo",
 			Handler:    _Rbdkv_LeaderInfo_Handler,
+		},
+		{
+			MethodName: "ClusterStats",
+			Handler:    _Rbdkv_ClusterStats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

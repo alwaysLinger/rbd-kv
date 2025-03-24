@@ -28,7 +28,7 @@ type FSM struct {
 }
 
 func OpenFSM(dir string, opts *badger.Options, applyLog applyFunc) (*FSM, error) {
-	if dir == "" {
+	if len(dir) == 0 {
 		dir = os.TempDir()
 	}
 
@@ -151,6 +151,30 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 	}
 
 	return nil
+}
+
+func (s *FSM) Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint64, err error) {
+	if exact {
+		s1, s2 := s.db.Size()
+		lsmSize, vlogSize = uint64(s1), uint64(s2)
+	} else {
+		lsmSize, vlogSize = s.db.EstimateSize(nil)
+	}
+	if withKeyCount {
+		err = s.db.View(func(txn *badger.Txn) error {
+			it := txn.NewIterator(badger.IteratorOptions{})
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				keyCount++
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		return
+	}
+	return
 }
 
 type badgersnapshot struct {

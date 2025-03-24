@@ -75,6 +75,10 @@ func (s *KVService) Watch(request *pb.WatchRequest, g grpc.ServerStreamingServer
 	return rbdkv.ErrWatcherClosed
 }
 
+func (s *KVService) ClusterStats(ctx context.Context, request *pb.ClusterStatsRequest) (*pb.ClusterStatsResponse, error) {
+	return s.store.ClusterStats(ctx, request)
+}
+
 func NewKVService(s rbdkv.Store) *KVService {
 	return &KVService{
 		UnimplementedRbdkvServer: pb.UnimplementedRbdkvServer{},

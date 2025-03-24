@@ -8,9 +8,7 @@ service Rbdkv {
   rpc Execute(Command) returns (CommandResponse) {}
   rpc Watch(WatchRequest) returns (stream WatchResponse) {}
   rpc LeaderInfo(LeaderRequest) returns (LeaderInfoResponse) {}
-  // todo raft raft wal fsm stats
-  // rpc ClusterStats(ClusterStatsRequest) returns (ClusterStatsResponse) {}
-  // todo move Join method here
+  rpc ClusterStats(ClusterStatsRequest) returns (ClusterStatsResponse) {}
 }
 
 service Controller {
@@ -85,4 +83,37 @@ message JoinRequest {
 
 message JoinResponse {
   LeaderInfoResponse leader_info = 1;
+}
+
+message ClusterStatsRequest {
+  message WithSize {
+    bool exact_size = 1;
+    bool with_key_count = 2;
+  }
+
+  bool with_raft = 1;
+  WithSize with_fsm = 2;
+}
+
+message ClusterStatsResponse {
+  message RaftMeta {
+    map<string, string> meta = 5;
+  }
+
+  message StorageStats {
+    uint64 lsm_size = 1;
+    uint64 vlog_size = 2;
+    uint64 keys_count = 3;
+  }
+
+  message Peer {
+    string id = 1;
+    bool is_learner = 2;
+    bool is_leader = 3;
+    bool is_local = 4;
+    RaftMeta raft = 5;
+    StorageStats fsm = 6;
+  }
+
+  repeated Peer peers = 1;
 }

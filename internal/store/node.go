@@ -13,6 +13,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	badgerpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/hashicorp/raft"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )
@@ -38,6 +39,7 @@ type Store interface {
 	LeaderInfo() (string, string, uint64, error)
 	Watch(ctx context.Context, cmd *pb.WatchRequest) (<-chan *pb.Event, error)
 	AddPeer(ctx context.Context, id, addr string) error
+	ClusterStats(ctx context.Context, req *pb.ClusterStatsRequest) (*pb.ClusterStatsResponse, error)
 
 	Runner
 	Observer
@@ -278,10 +280,84 @@ func durationFromCtx(ctx context.Context) (time.Duration, error) {
 
 func (n *Node) LeaderInfo() (string, string, uint64, error) {
 	addr, id := n.raft.LeaderWithID()
-	if addr == "" {
+	if len(addr) == 0 {
 		return "", "", 0, nerr.NewNodeError(ErrNoLeader, "unknown", "", 0)
 	}
 	return string(addr), string(id), n.raft.CurrentTerm(), nil
+}
+
+func (n *Node) ClusterStats(ctx context.Context, req *pb.ClusterStatsRequest) (*pb.ClusterStatsResponse, error) {
+	var (
+		cf                          raft.ConfigurationFuture
+		leaderID                    string
+		raftMeta                    map[string]string
+		lsmSize, vlogSize, keyCount uint64
+	)
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		cf = n.raft.GetConfiguration()
+		return cf.Error()
+	})
+	g.Go(func() error {
+		var err error
+		_, leaderID, _, err = n.LeaderInfo()
+		if err != nil && !errors.Is(err, ErrNoLeader) {
+			return err
+		}
+		return nil
+	})
+	if req.WithRaft {
+		g.Go(func() error {
+			raftMeta = n.raft.Stats()
+			return nil
+		})
+	}
+
+	if r := req.WithFsm; r != nil {
+		g.Go(func() error {
+			var err error
+			lsmSize, vlogSize, keyCount, err = n.fsm.Stats(r.ExactSize, r.WithKeyCount)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	confs := cf.Configuration()
+	if len(confs.Servers) == 0 {
+		return nil, fmt.Errorf("no servers found in cluster config")
+	}
+	peers := make([]*pb.ClusterStatsResponse_Peer, len(confs.Servers))
+	servers := confs.Clone()
+	for i, _ := range peers {
+		peer := new(pb.ClusterStatsResponse_Peer)
+		peer.Id = string(servers.Servers[i].ID)
+		peer.IsLearner = servers.Servers[i].Suffrage == raft.Nonvoter
+		peer.IsLeader = string(servers.Servers[i].ID) == leaderID
+		peer.IsLocal = peer.Id == n.id
+		if peer.IsLocal {
+			if req.WithRaft {
+				peer.Raft = &pb.ClusterStatsResponse_RaftMeta{Meta: raftMeta}
+			}
+			if r := req.WithFsm; r != nil {
+				peer.Fsm = &pb.ClusterStatsResponse_StorageStats{
+					LsmSize:   lsmSize,
+					VlogSize:  vlogSize,
+					KeysCount: keyCount,
+				}
+			}
+		}
+		peers[i] = peer
+	}
+
+	return &pb.ClusterStatsResponse{Peers: peers}, nil
 }
 
 func (n *Node) Watch(ctx context.Context, cmd *pb.WatchRequest) (<-chan *pb.Event, error) {
@@ -467,7 +543,7 @@ func (n *Node) setKVConn(addr string) error {
 	return nil
 }
 
-func NewNode(fsm *FSM, id string) *Node {
+func NewNode(id string, fsm *FSM) *Node {
 	dispatcher := newEventDispatcher(fsm)
 	opts := &storeOptions{
 		ReadTimeout:  2000 * time.Millisecond,
