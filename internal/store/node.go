@@ -4,9 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	raftbadger "github.com/alwaysLinger/raft-badgerdb"
 	nerr "github.com/alwaysLinger/rbkv/error"
 	"github.com/alwaysLinger/rbkv/internal/meta"
 	"github.com/alwaysLinger/rbkv/pb"
@@ -23,7 +29,6 @@ var (
 	ErrNotLeader         = errors.New("not leader")
 	ErrLeaderShipChanged = errors.New("leader changed")
 	ErrNoLeader          = errors.New("no leader found within the cluster for now")
-	ErrPeerExists        = errors.New("peer already exists")
 
 	ErrWatcherIDConflict     = errors.New("watcher already exists")
 	ErrWatcherConsumeTooSlow = errors.New("watcher consume too slow")
@@ -32,31 +37,26 @@ var (
 	ErrLeaderConnChanged = errors.New("leader changed while forward cmd to leader")
 )
 
+type RaftNode interface {
+	WithRaft(raftAddr, joinAddr, logAddr string) error
+	AddPeer(ctx context.Context, id, addr string) error
+
+	Run() error
+	Close() error
+}
+
 type Store interface {
 	Get(ctx context.Context, cmd *pb.Command) ([]byte, error)
 	Put(ctx context.Context, cmd *pb.Command) error
 	Delete(ctx context.Context, cmd *pb.Command) error
 	LeaderInfo() (string, string, uint64, error)
 	Watch(ctx context.Context, cmd *pb.WatchRequest) (<-chan *pb.Event, error)
-	AddPeer(ctx context.Context, id, addr string) error
 	ClusterStats(ctx context.Context, req *pb.ClusterStatsRequest) (*pb.ClusterStatsResponse, error)
-
-	Runner
-	Observer
-}
-
-type Runner interface {
-	Open() error
-	Close() error
-}
-
-type Observer interface {
-	ObChan() chan raft.Observation
-	WithRaft(r *raft.Raft)
 }
 
 type Node struct {
 	id         string
+	isLeader   *atomic.Bool
 	fsm        *FSM
 	raft       *raft.Raft
 	opts       *storeOptions
@@ -95,14 +95,14 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
 			if _, id, _, err := n.LeaderInfo(); err != nil {
 				errCh <- err
 			} else {
-				if n.isLeader(id) {
+				if n.isLeaderWithID(id) {
 					staleTerm := n.raft.CurrentTerm()
 					switch v := n.propose(ctx, cmd).(type) {
 					case []byte:
 						if _, id, term, err := n.LeaderInfo(); err != nil {
 							errCh <- err
 						} else {
-							if n.isLeader(id) && staleTerm == term {
+							if n.isLeaderWithID(id) && staleTerm == term {
 								valCh <- v
 							} else {
 								if addr, id, term, err := n.LeaderInfo(); err != nil {
@@ -146,7 +146,7 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
 	}
 }
 
-func (n *Node) isLeader(id string) bool {
+func (n *Node) isLeaderWithID(id string) bool {
 	return n.id == id
 }
 
@@ -205,7 +205,7 @@ func (n *Node) Put(ctx context.Context, cmd *pb.Command) error {
 	if _, id, _, err := n.LeaderInfo(); err != nil {
 		return err
 	} else {
-		if n.isLeader(id) {
+		if n.isLeaderWithID(id) {
 			if err, ok := n.propose(ctx, cmd).(error); ok {
 				return err
 			}
@@ -222,7 +222,7 @@ func (n *Node) Delete(ctx context.Context, cmd *pb.Command) error {
 	if _, id, _, err := n.LeaderInfo(); err != nil {
 		return err
 	} else {
-		if n.isLeader(id) {
+		if n.isLeaderWithID(id) {
 			if err, ok := n.propose(ctx, cmd).(error); ok {
 				return err
 			}
@@ -483,7 +483,7 @@ func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
 			}
 			future := n.raft.RemoveServer(srv.ID, 0, timeout)
 			if err := future.Error(); err != nil {
-				return fmt.Errorf("node id: %s at %s %w", id, err, ErrPeerExists)
+				return fmt.Errorf("failed while removing node:%s at %s: %w", id, addr, err)
 			}
 		}
 	}
@@ -495,7 +495,110 @@ func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
 	return nil
 }
 
-func (n *Node) Open() error {
+func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
+	c := raft.DefaultConfig()
+	c.LocalID = raft.ServerID(n.id)
+
+	tcpAddr, err := net.ResolveTCPAddr("tcp", raftAddr)
+	if err != nil {
+		return err
+	}
+	transport, err := raft.NewTCPTransport(raftAddr, tcpAddr, 3, 5*time.Second, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	snapshots, err := raft.NewFileSnapshotStore(logAddr, 3, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	logDir := filepath.Join(logAddr, "raftlog")
+	var logStore raft.LogStore
+	var stableStore raft.StableStore
+	var rs *raftbadger.Store
+	if rs, err = raftbadger.NewStore(logDir, nil, nil); err != nil {
+		return err
+	} else {
+		logStore, stableStore = rs, rs
+	}
+
+	observer := raft.NewObserver(n.obCh, true, func(o *raft.Observation) bool {
+		switch o.Data.(type) {
+		case raft.LeaderObservation, raft.PeerObservation:
+			return true
+		default:
+			return false
+		}
+	})
+
+	r, err := raft.NewRaft(c, n.fsm, logStore, stableStore, snapshots, transport)
+	if err != nil {
+		return err
+	}
+	n.raft = r
+	go func() {
+		for c := range n.raft.LeaderCh() {
+			n.isLeader.Store(c)
+		}
+	}()
+
+	r.RegisterObserver(observer)
+
+	if len(joinAddr) == 0 {
+		var recoverable bool
+		var err error
+		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
+			log.Printf("%w, current node self recovery may fail, try bootstrap the cluster", err)
+			recoverable = true
+		}
+		if recoverable && err == nil {
+			return nil
+		}
+
+		conf := raft.Configuration{
+			Servers: []raft.Server{
+				{
+					ID:      c.LocalID,
+					Address: transport.LocalAddr(),
+				},
+			},
+		}
+		// any further attempts to bootstrap will return an error that can be safely ignored
+		r.BootstrapCluster(conf)
+	} else {
+		var recoverable bool
+		var err error
+		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
+			log.Printf("%w, current node self recovery may fail, try join the cluster", err)
+			recoverable = true
+		}
+		if recoverable && err == nil {
+			return nil
+		}
+
+		conn, err := grpc.Dial(joinAddr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second))
+		if err != nil {
+			return fmt.Errorf("%w, error occurred when trying to join the cluster, please retry with the latest leader address", err)
+		}
+		defer conn.Close()
+		client := pb.NewRbdkvClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		req := &pb.JoinRequest{
+			Id:   n.id,
+			Addr: raftAddr,
+		}
+		defer cancel()
+		_, err = client.Join(ctx, req)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (n *Node) Run() error {
 	if _, id, _, err := n.LeaderInfo(); err == nil {
 		if err := n.setKVConn(id); err != nil {
 			return err
@@ -508,12 +611,30 @@ func (n *Node) Close() error {
 	return n.fsm.Close()
 }
 
-func (n *Node) ObChan() chan raft.Observation {
-	return n.obCh
-}
-
-func (n *Node) WithRaft(r *raft.Raft) {
-	n.raft = r
+func NewNode(id string, fsm *FSM) *Node {
+	dispatcher := newEventDispatcher(fsm)
+	opts := &storeOptions{
+		ReadTimeout:  2000 * time.Millisecond,
+		WriteTimeout: 3000 * time.Millisecond,
+	}
+	obCh := make(chan raft.Observation, 100)
+	n := &Node{
+		id:         id,
+		isLeader:   new(atomic.Bool),
+		fsm:        fsm,
+		opts:       opts,
+		dispatcher: dispatcher,
+		obCh:       obCh,
+		mu:         new(sync.RWMutex),
+	}
+	go func() {
+		for ob := range obCh {
+			if e, ok := ob.Data.(raft.LeaderObservation); ok {
+				_ = n.setKVConn(string(e.LeaderID))
+			}
+		}
+	}()
+	return n
 }
 
 func (n *Node) setKVConn(addr string) error {
@@ -541,29 +662,4 @@ func (n *Node) setKVConn(addr string) error {
 	n.mu.Unlock()
 
 	return nil
-}
-
-func NewNode(id string, fsm *FSM) *Node {
-	dispatcher := newEventDispatcher(fsm)
-	opts := &storeOptions{
-		ReadTimeout:  2000 * time.Millisecond,
-		WriteTimeout: 3000 * time.Millisecond,
-	}
-	obCh := make(chan raft.Observation, 100)
-	n := &Node{
-		id:         id,
-		fsm:        fsm,
-		opts:       opts,
-		dispatcher: dispatcher,
-		obCh:       obCh,
-		mu:         new(sync.RWMutex),
-	}
-	go func() {
-		for ob := range obCh {
-			if e, ok := ob.Data.(raft.LeaderObservation); ok {
-				_ = n.setKVConn(string(e.LeaderID))
-			}
-		}
-	}()
-	return n
 }

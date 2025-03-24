@@ -16,6 +16,7 @@ type KVService struct {
 	pb.UnimplementedRbdkvServer
 
 	store  rbdkv.Store
+	node   rbdkv.RaftNode
 	server *grpc.Server
 }
 
@@ -79,10 +80,18 @@ func (s *KVService) ClusterStats(ctx context.Context, request *pb.ClusterStatsRe
 	return s.store.ClusterStats(ctx, request)
 }
 
-func NewKVService(s rbdkv.Store) *KVService {
+func (s *KVService) Join(ctx context.Context, request *pb.JoinRequest) (*pb.JoinResponse, error) {
+	if err := s.node.AddPeer(ctx, request.Id, request.Addr); err != nil {
+		return nil, err
+	}
+	return &pb.JoinResponse{}, nil
+}
+
+func NewKVService(s rbdkv.Store, n rbdkv.RaftNode) *KVService {
 	return &KVService{
 		UnimplementedRbdkvServer: pb.UnimplementedRbdkvServer{},
 		store:                    s,
+		node:                     n,
 	}
 }
 

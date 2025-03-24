@@ -9,9 +9,6 @@ service Rbdkv {
   rpc Watch(WatchRequest) returns (stream WatchResponse) {}
   rpc LeaderInfo(LeaderRequest) returns (LeaderInfoResponse) {}
   rpc ClusterStats(ClusterStatsRequest) returns (ClusterStatsResponse) {}
-}
-
-service Controller {
   rpc Join(JoinRequest) returns (JoinResponse){}
 }
 

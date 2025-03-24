@@ -13,7 +13,6 @@ import (
 var (
 	grpcAddr string
 	raftAddr string
-	advAddr  string
 	joinAddr string
 	logDir   string
 	kvDir    string
@@ -21,7 +20,6 @@ var (
 
 func init() {
 	flag.StringVar(&grpcAddr, "grpc-addr", "", "Set the GRPC bind address and also used as the node id")
-	flag.StringVar(&advAddr, "advertise-addr", "", "Set the advertise GRPC bind address")
 	flag.StringVar(&raftAddr, "raft-addr", "", "Set Raft bind address")
 	flag.StringVar(&joinAddr, "join-addr", "", "Set join address, if any")
 	flag.StringVar(&logDir, "log-dir", "", "Set raft log and metadata storage dir")
@@ -34,7 +32,6 @@ func main() {
 	opts := &internal.Options{
 		RaftAddr: raftAddr,
 		GrpcAddr: grpcAddr,
-		AdvAddr:  advAddr,
 		JoinAddr: joinAddr,
 		NodeID:   grpcAddr,
 		LogDir:   logDir,
