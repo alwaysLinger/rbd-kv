@@ -465,6 +465,10 @@ func (h *eventDispatcher) add(w *watcher) error {
 }
 
 func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
+	if !n.isLeader.Load() {
+		return ErrNotLeader
+	}
+
 	timeout, err := durationFromCtx(ctx)
 	if err != nil {
 		return err
