@@ -502,6 +502,10 @@ func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
 func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
 	c := raft.DefaultConfig()
 	c.LocalID = raft.ServerID(n.id)
+	c.ShutdownOnRemove = false
+	c.HeartbeatTimeout = 500 * time.Millisecond
+	c.ElectionTimeout = 1500 * time.Millisecond
+	c.LeaderLeaseTimeout = 800 * time.Millisecond
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", raftAddr)
 	if err != nil {
