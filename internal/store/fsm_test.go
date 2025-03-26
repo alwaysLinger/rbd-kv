@@ -43,7 +43,6 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 	}
 	defer fsm.Close()
 
-	// 写入一些测试数据
 	testData := []struct {
 		key   []byte
 		value []byte
@@ -52,7 +51,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 		{[]byte("k2"), []byte("v2")},
 	}
 
-	for _, d := range testData {
+	for i, d := range testData {
 		cmd := &pb.Command{
 			Op:    pb.Command_Put,
 			Key:   d.key,
@@ -62,7 +61,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c := fsm.Apply(&raft.Log{Data: data}); c != nil {
+		if c := fsm.Apply(&raft.Log{Data: data, Index: uint64(i + 1)}); c != nil {
 			t.Fatal(err)
 		}
 	}
@@ -102,6 +101,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 			return err
 		})
 		if err != nil {
+			t.Log(err)
 			t.Errorf("failed to get key %s after restore: %v", d.key, err)
 			continue
 		}
