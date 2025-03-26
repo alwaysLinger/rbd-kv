@@ -37,7 +37,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 	dir := filepath.Join("/tmp", "fsm-snapshot-test")
 	defer os.RemoveAll(dir)
 
-	fsm, err := OpenFSM(dir, nil, nil)
+	fsm, err := OpenFSM(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 		t.Error("snapshot sink Close() was not called")
 	}
 
-	restoreFSM, err := OpenFSM(filepath.Join(dir, "restore"), nil, nil)
+	restoreFSM, err := OpenFSM(filepath.Join(dir, "restore"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

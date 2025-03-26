@@ -37,7 +37,7 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, err
 	}
 
-	fsm, err := storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, nil)
+	fsm, err := storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -17,17 +18,17 @@ const (
 	restoreGoNum = 16
 )
 
+var appliedIndexKey = []byte("ai#")
+
 var ErrNotFound = errors.New("key not found")
 
-type applyFunc func(log *raft.Log) interface{}
-
 type FSM struct {
-	db *badger.DB
-	applyFunc
-	gcTicker *time.Ticker
+	appliedIndex uint64
+	db           *badger.DB
+	gcTicker     *time.Ticker
 }
 
-func OpenFSM(dir string, opts *badger.Options, applyLog applyFunc) (*FSM, error) {
+func OpenFSM(dir string, opts *badger.Options) (*FSM, error) {
 	if len(dir) == 0 {
 		dir = os.TempDir()
 	}
@@ -45,13 +46,30 @@ func OpenFSM(dir string, opts *badger.Options, applyLog applyFunc) (*FSM, error)
 	}
 	s.db = db
 
-	if applyLog != nil {
-		s.applyFunc = applyLog
+	if err := s.loadAppliedIndexFromDB(); err != nil {
+		return nil, err
 	}
-
 	go s.runGC()
 
 	return s, nil
+}
+
+func (s *FSM) loadAppliedIndexFromDB() error {
+	err := s.db.View(func(txn *badger.Txn) error {
+		if item, err := txn.Get(appliedIndexKey); err != nil {
+			if !errors.Is(err, badger.ErrKeyNotFound) {
+				return err
+			}
+			return nil
+		} else {
+			_ = item.Value(func(val []byte) error {
+				s.appliedIndex = binary.BigEndian.Uint64(val)
+				return nil
+			})
+		}
+		return nil
+	})
+	return err
 }
 
 func (s *FSM) runGC() {
@@ -76,9 +94,15 @@ func (s *FSM) DB() *badger.DB {
 	return s.db
 }
 
+func uint64ToBytes(u uint64) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, u)
+	return buf
+}
+
 func (s *FSM) Apply(log *raft.Log) interface{} {
-	if s.applyFunc != nil {
-		return s.applyFunc(log)
+	if s.appliedIndex >= log.Index {
+		return nil
 	}
 
 	cmd := &pb.Command{}
@@ -89,9 +113,13 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 
 	if cmd.Op == pb.Command_Get {
 		var val []byte
-		err := s.db.View(func(txn *badger.Txn) error {
+		err := s.db.Update(func(txn *badger.Txn) error {
+			if err := txn.Set(appliedIndexKey, uint64ToBytes(log.Index)); err != nil {
+				return err
+			}
 			if item, err := txn.Get(cmd.Key); err != nil {
 				if errors.Is(err, badger.ErrKeyNotFound) {
+					s.appliedIndex = log.Index
 					return ErrNotFound
 				}
 				return err
@@ -99,6 +127,7 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 				if val, err = item.ValueCopy(val); err != nil {
 					return err
 				} else {
+					s.appliedIndex = log.Index
 					return nil
 				}
 			}
@@ -111,6 +140,9 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 	}
 
 	err = s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(appliedIndexKey, uint64ToBytes(log.Index)); err != nil {
+			return err
+		}
 		if cmd.Op == pb.Command_Put {
 			ent := badger.NewEntry(cmd.Key, cmd.Value)
 			if cmd.Ttl != 0 {
@@ -120,21 +152,19 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 			if err != nil {
 				return err
 			}
+			s.appliedIndex = log.Index
 			return nil
 		} else {
 			err = txn.Delete(cmd.Key)
 			if err != nil {
 				return err
 			}
+			s.appliedIndex = log.Index
 			return nil
 		}
 	})
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (s *FSM) Snapshot() (raft.FSMSnapshot, error) {
