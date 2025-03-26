@@ -503,9 +503,12 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
 	c := raft.DefaultConfig()
 	c.LocalID = raft.ServerID(n.id)
 	c.ShutdownOnRemove = false
-	c.HeartbeatTimeout = 500 * time.Millisecond
+	c.HeartbeatTimeout = 600 * time.Millisecond
 	c.ElectionTimeout = 1500 * time.Millisecond
-	c.LeaderLeaseTimeout = 800 * time.Millisecond
+	c.LeaderLeaseTimeout = 500 * time.Millisecond
+	if err := raft.ValidateConfig(c); err != nil {
+		return err
+	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", raftAddr)
 	if err != nil {
