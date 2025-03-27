@@ -7,6 +7,8 @@ github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRF
 github.com/alecthomas/units v0.0.0-20190924025748-f65c72e2690d/go.mod h1:rBZYJk541a8SKzHPHnH3zbiI+7dagKZ0cgpgrD7Fyho=
 github.com/alwaysLinger/raft-badgerdb v0.0.0-20250319165130-7cf1d5edbc78 h1:qzeEPk1jFcdMxW6LKJD2Y43GioTKHba424+Ox4PPAYM=
 github.com/alwaysLinger/raft-badgerdb v0.0.0-20250319165130-7cf1d5edbc78/go.mod h1:KWHPaRAYq7SSRBXQLTjbKhOqAQCxhzqQ6d6TXycbX7w=
+github.com/alwaysLinger/raft-badgerdb v0.0.0-20250326172820-75708fb66d34 h1:h15bCogRP7jnTiD9m4yhWNnj/IT0R4Z++0S/P7awLtY=
+github.com/alwaysLinger/raft-badgerdb v0.0.0-20250326172820-75708fb66d34/go.mod h1:KWHPaRAYq7SSRBXQLTjbKhOqAQCxhzqQ6d6TXycbX7w=
 github.com/armon/go-metrics v0.4.1 h1:hR91U9KYmb6bLBYLQjyM+3j+rcd/UhE+G78SFnF8gJA=
 github.com/armon/go-metrics v0.4.1/go.mod h1:E6amYzXo6aW1tqzoZGT755KkbgrJsSdpwZ+3JqfkOG4=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
