@@ -58,6 +58,7 @@ type Node struct {
 	id         string
 	isLeader   *atomic.Bool
 	fsm        *FSM
+	logStore   *raftbadger.Store
 	raft       *raft.Raft
 	opts       *storeOptions
 	dispatcher *eventDispatcher
@@ -531,7 +532,7 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
 	if rs, err = raftbadger.NewStore(logDir, nil, nil); err != nil {
 		return err
 	} else {
-		logStore, stableStore = rs, rs
+		n.logStore, logStore, stableStore = rs, rs, rs
 	}
 
 	observer := raft.NewObserver(n.obCh, true, func(o *raft.Observation) bool {
@@ -619,6 +620,20 @@ func (n *Node) Run() error {
 }
 
 func (n *Node) Close() error {
+	if n.isLeader.Load() {
+		bf := n.raft.Barrier(30 * time.Second)
+		if err := bf.Error(); err != nil {
+			log.Printf("error occurred while keeping peers applied logs aligned: %v\n", err)
+		}
+	}
+	sf := n.raft.Shutdown()
+	if err := sf.Error(); err != nil {
+		log.Printf("error occurred while shutting down raft: %v\n", err)
+	}
+
+	if err := n.logStore.Close(); err != nil {
+		log.Printf("error occurred while closing raft log storage: %v\n", err)
+	}
 	return n.fsm.Close()
 }
 
