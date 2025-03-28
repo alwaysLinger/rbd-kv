@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,11 +12,12 @@ import (
 )
 
 var (
-	grpcAddr string
-	raftAddr string
-	joinAddr string
-	logDir   string
-	kvDir    string
+	grpcAddr  string
+	raftAddr  string
+	joinAddr  string
+	logDir    string
+	kvDir     string
+	batchSize uint64
 )
 
 func init() {
@@ -24,18 +26,20 @@ func init() {
 	flag.StringVar(&joinAddr, "join-addr", "", "Set join address, if any")
 	flag.StringVar(&logDir, "log-dir", "", "Set raft log and metadata storage dir")
 	flag.StringVar(&kvDir, "kv-dir", "", "Set kv log storage dir")
+	flag.Uint64Var(&batchSize, "batch-size", 0, "Size of apply channel batch, values <= 0 disable batching")
 }
 
 func main() {
 	flag.Parse()
 
 	opts := &internal.Options{
-		RaftAddr: raftAddr,
-		GrpcAddr: grpcAddr,
-		JoinAddr: joinAddr,
-		NodeID:   grpcAddr,
-		LogDir:   logDir,
-		KVDir:    kvDir,
+		RaftAddr:  raftAddr,
+		GrpcAddr:  grpcAddr,
+		JoinAddr:  joinAddr,
+		NodeID:    grpcAddr,
+		LogDir:    logDir,
+		KVDir:     kvDir,
+		BatchSize: batchSize,
 	}
 
 	server, err := internal.NewServer(opts)
@@ -59,7 +63,7 @@ func main() {
 			os.Exit(1)
 		}
 	case <-notify:
-		fmt.Println("closing")
+		log.Println("closing")
 	}
 
 	if err := server.Close(); err != nil {

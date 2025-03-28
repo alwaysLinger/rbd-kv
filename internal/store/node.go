@@ -38,7 +38,7 @@ var (
 )
 
 type RaftNode interface {
-	WithRaft(raftAddr, joinAddr, logAddr string) error
+	WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) error
 	AddPeer(ctx context.Context, id, addr string) error
 
 	Run() error
@@ -57,7 +57,7 @@ type Store interface {
 type Node struct {
 	id         string
 	isLeader   *atomic.Bool
-	fsm        *FSM
+	fsm        DBFSM
 	logStore   *raftbadger.Store
 	raft       *raft.Raft
 	opts       *storeOptions
@@ -401,13 +401,13 @@ func (n *Node) newWatcher(ctx context.Context, id watcherID, prefixes [][]byte, 
 }
 
 type eventDispatcher struct {
-	fsm *FSM
+	fsm DBFSM
 
 	mu       *sync.RWMutex
 	watchers map[watcherID]*watcher
 }
 
-func newEventDispatcher(fsm *FSM) *eventDispatcher {
+func newEventDispatcher(fsm DBFSM) *eventDispatcher {
 	return &eventDispatcher{
 		fsm:      fsm,
 		mu:       new(sync.RWMutex),
@@ -500,13 +500,19 @@ func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
 	return nil
 }
 
-func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string) error {
+func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) error {
 	c := raft.DefaultConfig()
 	c.LocalID = raft.ServerID(n.id)
 	c.ShutdownOnRemove = false
 	c.HeartbeatTimeout = 600 * time.Millisecond
 	c.ElectionTimeout = 1500 * time.Millisecond
 	c.LeaderLeaseTimeout = 500 * time.Millisecond
+	if batchSize > 0 {
+		c.CommitTimeout = 10 * time.Millisecond
+		c.MaxAppendEntries = int(batchSize)
+		c.BatchApplyCh = true
+	}
+
 	if err := raft.ValidateConfig(c); err != nil {
 		return err
 	}
@@ -637,7 +643,7 @@ func (n *Node) Close() error {
 	return n.fsm.Close()
 }
 
-func NewNode(id string, fsm *FSM) *Node {
+func NewNode(id string, fsm DBFSM) *Node {
 	dispatcher := newEventDispatcher(fsm)
 	opts := &storeOptions{
 		ReadTimeout:  2000 * time.Millisecond,

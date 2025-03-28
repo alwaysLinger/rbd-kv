@@ -22,6 +22,14 @@ var appliedIndexKey = []byte("ai#")
 
 var ErrNotFound = errors.New("key not found")
 
+type DBFSM interface {
+	DB() *badger.DB
+	Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint64, err error)
+	Close() error
+
+	raft.FSM
+}
+
 type FSM struct {
 	appliedIndex uint64
 	db           *badger.DB
@@ -103,6 +111,8 @@ func uint64ToBytes(u uint64) []byte {
 func (s *FSM) Apply(log *raft.Log) interface{} {
 	if s.appliedIndex >= log.Index {
 		return nil
+	} else {
+		s.appliedIndex = log.Index
 	}
 
 	cmd := &pb.Command{}
@@ -119,7 +129,6 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 			}
 			if item, err := txn.Get(cmd.Key); err != nil {
 				if errors.Is(err, badger.ErrKeyNotFound) {
-					s.appliedIndex = log.Index
 					return ErrNotFound
 				}
 				return err
@@ -127,7 +136,6 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 				if val, err = item.ValueCopy(val); err != nil {
 					return err
 				} else {
-					s.appliedIndex = log.Index
 					return nil
 				}
 			}
@@ -152,14 +160,12 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 			if err != nil {
 				return err
 			}
-			s.appliedIndex = log.Index
 			return nil
 		} else {
 			err = txn.Delete(cmd.Key)
 			if err != nil {
 				return err
 			}
-			s.appliedIndex = log.Index
 			return nil
 		}
 	})
@@ -177,6 +183,10 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 	}
 
 	if err := s.db.Load(snapshot, restoreGoNum); err != nil {
+		return err
+	}
+
+	if err := s.loadAppliedIndexFromDB(); err != nil {
 		return err
 	}
 

@@ -22,6 +22,10 @@ implementation.
 3. Watch mechanism for key events
 4. SSD design friendly, FSM storage size unlimited, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
 5. Use grpc as client interface
+6. Support [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft), with this feature enabled, you will get
+   higher throughput but may increase log replication latency, potentially losing more raft logs that haven't been
+   applied to the state machine which can be re-applied by WAL replay. 
+
 
 ## Why?
 
@@ -32,22 +36,24 @@ consistency and reliable KV storage, which led to the creation of this project.
 
 ## Example
 
-1. When bootstrap a cluster for the first time, you need to explicitly specify the leader peer address to join. Like
-   node2 and node3 use the --join-addr flag to specify the address:  
+1. **When bootstrap a cluster for the first time, you need to explicitly specify the leader peer address to join. Like
+   node2 and node3 use the --join-addr flag to specify the address:**  
    ./rbkv --grpc-addr=localhost:9501 --raft-addr=localhost:9601 --log-dir=/tmp/node1 --kv-dir=/tmp/node1  
    ./rbkv --grpc-addr=localhost:9502 --join-addr=localhost:9501 --raft-addr=localhost:9602 --log-dir=/tmp/node2
    --kv-dir=/tmp/node2  
    ./rbkv --grpc-addr=localhost:9503 --join-addr=localhost:9501 --raft-addr=localhost:9603 --log-dir=/tmp/node3
    --kv-dir=/tmp/node3
-2. Once a node has successfully joined a cluster, you don't need to specify the --join-addr flag ever again. The node
-   will automatically rejoin the cluster using its stored state in any order:  
+
+
+2. **Once a node has successfully joined a cluster, you don't need to specify the --join-addr flag ever again. The node
+   will automatically rejoin the cluster using its stored state in any order:**  
    ./rbkv --grpc-addr=localhost:9502 --raft-addr=localhost:9602 --log-dir=/tmp/node2 --kv-dir=/tmp/node2  
    ./rbkv --grpc-addr=localhost:9503 --raft-addr=localhost:9603 --log-dir=/tmp/node3 --kv-dir=/tmp/node3  
    ./rbkv --grpc-addr=localhost:9501 --raft-addr=localhost:9601 --log-dir=/tmp/node1 --kv-dir=/tmp/node1
 
 ## TODO
 
-1. Support transaction
+1. Support multi keys transaction
 2. Smarter client
 3. Cmdline tool
 

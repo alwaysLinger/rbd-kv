@@ -11,6 +11,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const minRaftLogBatchSize uint64 = 10
+const maxRaftLogBatchSize uint64 = 500
+
 var ErrOptsCheckFailed = errors.New("options check failed")
 
 type Server struct {
@@ -20,12 +23,13 @@ type Server struct {
 }
 
 type Options struct {
-	RaftAddr string
-	GrpcAddr string
-	JoinAddr string
-	NodeID   string
-	LogDir   string
-	KVDir    string
+	RaftAddr  string
+	GrpcAddr  string
+	JoinAddr  string
+	NodeID    string
+	LogDir    string
+	KVDir     string
+	BatchSize uint64
 }
 
 func NewServer(opts *Options) (*Server, error) {
@@ -37,13 +41,19 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, err
 	}
 
-	fsm, err := storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil)
+	var fsm storage.DBFSM
+	var err error
+	if opts.BatchSize > 0 {
+		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil)
+	} else {
+		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	n := storage.NewNode(opts.NodeID, fsm)
-	if err := n.WithRaft(opts.RaftAddr, opts.JoinAddr, opts.LogDir); err != nil {
+	if err := n.WithRaft(opts.RaftAddr, opts.JoinAddr, opts.LogDir, opts.BatchSize); err != nil {
 		return nil, err
 	}
 
@@ -72,6 +82,8 @@ func checkOpts(opts *Options) error {
 	if len(opts.KVDir) == 0 {
 		return fmt.Errorf("%w:kv dir not found", ErrOptsCheckFailed)
 	}
+	opts.BatchSize = max(opts.BatchSize, minRaftLogBatchSize)
+	opts.BatchSize = min(opts.BatchSize, maxRaftLogBatchSize)
 	return nil
 }
 
