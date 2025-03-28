@@ -18,7 +18,7 @@ const (
 	restoreGoNum = 16
 )
 
-var appliedIndexKey = []byte("ai#")
+var consistentIndexKey = []byte("m.!ci")
 
 var ErrNotFound = errors.New("key not found")
 
@@ -64,7 +64,7 @@ func OpenFSM(dir string, opts *badger.Options) (*FSM, error) {
 
 func (s *FSM) loadAppliedIndexFromDB() error {
 	err := s.db.View(func(txn *badger.Txn) error {
-		if item, err := txn.Get(appliedIndexKey); err != nil {
+		if item, err := txn.Get(consistentIndexKey); err != nil {
 			if !errors.Is(err, badger.ErrKeyNotFound) {
 				return err
 			}
@@ -124,7 +124,7 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 	if cmd.Op == pb.Command_Get {
 		var val []byte
 		err := s.db.Update(func(txn *badger.Txn) error {
-			if err := txn.Set(appliedIndexKey, uint64ToBytes(log.Index)); err != nil {
+			if err := txn.Set(consistentIndexKey, uint64ToBytes(log.Index)); err != nil {
 				return err
 			}
 			if item, err := txn.Get(cmd.Key); err != nil {
@@ -148,7 +148,7 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 	}
 
 	err = s.db.Update(func(txn *badger.Txn) error {
-		if err := txn.Set(appliedIndexKey, uint64ToBytes(log.Index)); err != nil {
+		if err := txn.Set(consistentIndexKey, uint64ToBytes(log.Index)); err != nil {
 			return err
 		}
 		if cmd.Op == pb.Command_Put {

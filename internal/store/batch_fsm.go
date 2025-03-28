@@ -31,7 +31,7 @@ func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
 		// not much that we can do about this error
 		err := b.fsm.db.Update(func(txn *badger.Txn) error {
 			b.fsm.appliedIndex = lastLog.Index
-			if err := txn.Set(appliedIndexKey, uint64ToBytes(lastLog.Index)); err != nil {
+			if err := txn.Set(consistentIndexKey, uint64ToBytes(lastLog.Index)); err != nil {
 				return err
 			}
 			return nil
@@ -99,10 +99,10 @@ func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
 	}
 
 	b.fsm.appliedIndex = lastLog.Index
-	if err := txn.Set(appliedIndexKey, uint64ToBytes(lastLog.Index)); err != nil {
+	if err := txn.Set(consistentIndexKey, uint64ToBytes(lastLog.Index)); err != nil {
 		if errors.Is(err, badger.ErrTxnTooBig) {
 			txn = b.fsm.db.NewTransaction(true)
-			_ = txn.Set(appliedIndexKey, uint64ToBytes(lastLog.Index))
+			_ = txn.Set(consistentIndexKey, uint64ToBytes(lastLog.Index))
 		} else {
 			log.Printf("error occurred while update consistent index to BadgerDB: %v\n", err)
 		}
