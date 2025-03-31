@@ -243,6 +243,7 @@ func BenchmarkApply(b *testing.B) {
 	log := &raft.Log{Data: data, Type: raft.LogCommand}
 
 	b.ResetTimer()
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		log.Index = uint64(i)
 		if err, ok := fsm.Apply(log).(error); ok && err != nil {

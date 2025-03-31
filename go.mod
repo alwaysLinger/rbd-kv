@@ -5,7 +5,7 @@ go 1.22.12
 toolchain go1.23.7
 
 require (
-	github.com/alwaysLinger/raft-badgerdb v0.0.0-20250326172820-75708fb66d34
+	github.com/alwaysLinger/raft-badgerdb v0.0.0-20250331145740-29aef7c51ccd
 	github.com/dgraph-io/badger/v4 v4.6.0
 	github.com/hashicorp/raft v1.7.2
 	golang.org/x/sync v0.11.0

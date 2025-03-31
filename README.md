@@ -1,5 +1,7 @@
 ## RAFT BadgerDB distributed KV
 
+[简体中文](README_CN.md)
+
 ## BadgerDB as Hashicorp/Raft FSM Implementation
 
 This repository implements [hashicorp/raft](https://github.com/hashicorp/raft)'s FSM interface
@@ -24,15 +26,24 @@ implementation.
 5. Use grpc as client interface
 6. Support [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft), with this feature enabled, you will get
    higher throughput but may increase log replication latency, potentially losing more raft logs that haven't been
-   applied to the state machine which can be re-applied by WAL replay. 
-
+   applied to the state machine which can be re-applied by WAL replay.
 
 ## Why?
 
-One of my application uses memory as a level2 cache, so I needed a general-purpose level1 cache similar to Redis (
-though
-performance doesn't need to match Redis since most requests don't access the database). However, I required better
-consistency and reliable KV storage, which led to the creation of this project.
+1. **Why write this project?**  
+   One of my application uses memory as a level2 cache, so I needed a general-purpose
+   level1 cache (performance doesn't need to match in-memory databases like Redis, as most requests won't reach the
+   database, but I still want it to be fast enough). However, I required better
+   consistency and reliable KV storage, which led to the creation of this project.
+2. **Why the FSM provides such a lazy compaction and persistence strategy?**   
+   For a higher write throughput and there is also no need for aggressive compaction or syncing.
+   Both [RAFT](https://github.com/hashicorp/raft)
+   and [BadgerDB](https://github.com/dgraph-io/badger) provide WAL mechanisms, giving us reliable data safety
+   guarantees. It's important to understand that RAFT only ensures log replication across the cluster, while reliable
+   storage depends entirely on the FSM implementation. To achieve higher write throughput, I've implemented a relatively
+   aggressive RAFT WAL persistence strategy (which still remains safe due to replication), while providing a more
+   conservative FSM data compaction and persistence strategy. Since this project also uses BadgerDB as storage for RAFT
+   logs and RAFT metadata, I believe these two strategies are relatively reasonable.
 
 ## Example
 

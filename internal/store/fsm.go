@@ -42,7 +42,7 @@ func OpenFSM(dir string, opts *badger.Options) (*FSM, error) {
 	}
 
 	if opts == nil {
-		options := badger.DefaultOptions(dir).WithNumGoroutines(backUpGoNum).WithLogger(nil)
+		options := badger.LSMOnlyOptions(dir).WithDetectConflicts(false).WithNumGoroutines(backUpGoNum).WithMetricsEnabled(false).WithLogger(nil)
 		opts = &options
 	}
 
