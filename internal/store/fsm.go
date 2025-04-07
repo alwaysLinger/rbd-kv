@@ -153,8 +153,8 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 		}
 		if cmd.Op == pb.Command_Put {
 			ent := badger.NewEntry(cmd.Key, cmd.Value)
-			if cmd.Ttl != 0 {
-				ent.WithTTL(time.Duration(cmd.Ttl) * time.Second)
+			if cmd.Ttl != nil {
+				ent.WithTTL(cmd.Ttl.AsDuration())
 			}
 			err = txn.SetEntry(ent)
 			if err != nil {

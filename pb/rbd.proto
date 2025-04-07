@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package rbdkv;
 
+import "google/protobuf/duration.proto";
+
 option go_package = "github.com/alwaysLinger/rbd-kv/pb";
 
 service Rbdkv {
@@ -30,7 +32,7 @@ message Command {
   ReadConsistency rc = 2;
   bytes key = 3;
   bytes value = 4;
-  uint64 ttl = 5;
+  google.protobuf.Duration ttl = 5;
 }
 
 message CommandResponse {

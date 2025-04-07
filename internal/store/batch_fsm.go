@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"slices"
-	"time"
 
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/dgraph-io/badger/v4"
@@ -70,8 +69,8 @@ func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
 		} else {
 			if cmd.Op == pb.Command_Put {
 				ent := badger.NewEntry(cmd.Key, cmd.Value)
-				if cmd.Ttl != 0 {
-					ent.WithTTL(time.Duration(cmd.Ttl) * time.Second)
+				if cmd.Ttl != nil {
+					ent.WithTTL(cmd.Ttl.AsDuration())
 				}
 				if err := txn.SetEntry(ent); err != nil {
 					if errors.Is(err, badger.ErrTxnTooBig) {
