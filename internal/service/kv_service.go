@@ -23,23 +23,23 @@ type KVService struct {
 func (s *KVService) Execute(ctx context.Context, command *pb.Command) (*pb.CommandResponse, error) {
 	switch command.Op {
 	case pb.Command_Get:
-		val, err := s.store.Get(ctx, command)
+		val, ver, err := s.store.Get(ctx, command)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.CommandResponse{Value: val}, nil
+		return &pb.CommandResponse{Value: val, Version: ver}, nil
 	case pb.Command_Put:
-		err := s.store.Put(ctx, command)
+		ver, err := s.store.Put(ctx, command)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.CommandResponse{}, nil
+		return &pb.CommandResponse{Version: ver}, nil
 	case pb.Command_Delete:
-		err := s.store.Delete(ctx, command)
+		ver, err := s.store.Delete(ctx, command)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.CommandResponse{}, nil
+		return &pb.CommandResponse{Version: ver}, nil
 	default:
 		return nil, status.Error(codes.InvalidArgument, "operation not support")
 	}

@@ -23,13 +23,14 @@ type Server struct {
 }
 
 type Options struct {
-	RaftAddr  string
-	GrpcAddr  string
-	JoinAddr  string
-	NodeID    string
-	LogDir    string
-	KVDir     string
-	BatchSize uint64
+	RaftAddr    string
+	GrpcAddr    string
+	JoinAddr    string
+	NodeID      string
+	LogDir      string
+	KVDir       string
+	BatchSize   uint64
+	VersionKeep int
 }
 
 func NewServer(opts *Options) (*Server, error) {
@@ -44,9 +45,9 @@ func NewServer(opts *Options) (*Server, error) {
 	var fsm storage.DBFSM
 	var err error
 	if opts.BatchSize > 0 {
-		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil)
+		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep)
 	} else {
-		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil)
+		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep)
 	}
 	if err != nil {
 		return nil, err
@@ -82,8 +83,13 @@ func checkOpts(opts *Options) error {
 	if len(opts.KVDir) == 0 {
 		return fmt.Errorf("%w:kv dir not found", ErrOptsCheckFailed)
 	}
-	opts.BatchSize = max(opts.BatchSize, minRaftLogBatchSize)
-	opts.BatchSize = min(opts.BatchSize, maxRaftLogBatchSize)
+	if opts.BatchSize != 0 {
+		opts.BatchSize = max(opts.BatchSize, minRaftLogBatchSize)
+		opts.BatchSize = min(opts.BatchSize, maxRaftLogBatchSize)
+	}
+	if opts.VersionKeep < 0 {
+		return fmt.Errorf("%w:version keep num less then 0", ErrOptsCheckFailed)
+	}
 	return nil
 }
 

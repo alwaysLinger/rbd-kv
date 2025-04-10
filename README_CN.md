@@ -16,11 +16,12 @@
 
 1. 基于 Raft 共识协议的强一致性
 2. 支持可序列化和线性化读取
-3. 键事件监听机制
-4. SSD 设计友好，FSM 存储大小不受限制，再次感谢 [BadgerDB](https://github.com/dgraph-io/badger)
-5. 使用 gRPC 作为客户端接口
-6. 支持 [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft)，启用此功能将获得更高的写吞吐，但可能增加日志复制延迟，可能会导致更多尚未应用到状态机的
-   raft 日志丢失，这些日志可以通过 WAL 重放恢复。
+3. 支持MVCC
+4. 键事件监听机制
+5. SSD 设计友好，FSM 存储大小不受限制，再次感谢 [BadgerDB](https://github.com/dgraph-io/badger)
+6. 使用 gRPC 作为客户端接口
+7. 支持 [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft)，启用此功能将获得更高的写吞吐，但可能增加日志复制延迟，可能会导致更多尚未应用到状态机的
+   raft 日志丢失，可通过 WAL 重放恢复。
 
 ## 为什么？
 

@@ -21,10 +21,11 @@ implementation.
 
 1. Strong consistency with Raft consensus protocol
 2. Serializable and linearizable read
-3. Watch mechanism for key events
-4. SSD design friendly, FSM storage size unlimited, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
-5. Use grpc as client interface
-6. Support [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft), with this feature enabled, you will get
+3. Support MVCC
+4. Watch mechanism for key events
+5. SSD design friendly, FSM storage size unlimited, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
+6. Use grpc as client interface
+7. Support [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft), with this feature enabled, you will get
    higher throughput but may increase log replication latency, potentially losing more raft logs that haven't been
    applied to the state machine which can be re-applied by WAL replay.
 

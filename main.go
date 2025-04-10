@@ -12,12 +12,13 @@ import (
 )
 
 var (
-	grpcAddr  string
-	raftAddr  string
-	joinAddr  string
-	logDir    string
-	kvDir     string
-	batchSize uint64
+	grpcAddr    string
+	raftAddr    string
+	joinAddr    string
+	logDir      string
+	kvDir       string
+	batchSize   uint64
+	versionKept int
 )
 
 func init() {
@@ -27,19 +28,21 @@ func init() {
 	flag.StringVar(&logDir, "log-dir", "", "Set raft log and metadata storage dir")
 	flag.StringVar(&kvDir, "kv-dir", "", "Set kv log storage dir")
 	flag.Uint64Var(&batchSize, "batch-size", 0, "Size of apply channel batch, values <= 0 disable batching")
+	flag.IntVar(&versionKept, "version-keep-num", 0, "Num of key version kept by fsm, num must greater than -1")
 }
 
 func main() {
 	flag.Parse()
 
 	opts := &internal.Options{
-		RaftAddr:  raftAddr,
-		GrpcAddr:  grpcAddr,
-		JoinAddr:  joinAddr,
-		NodeID:    grpcAddr,
-		LogDir:    logDir,
-		KVDir:     kvDir,
-		BatchSize: batchSize,
+		RaftAddr:    raftAddr,
+		GrpcAddr:    grpcAddr,
+		JoinAddr:    joinAddr,
+		NodeID:      grpcAddr,
+		LogDir:      logDir,
+		KVDir:       kvDir,
+		BatchSize:   batchSize,
+		VersionKeep: versionKept,
 	}
 
 	server, err := internal.NewServer(opts)

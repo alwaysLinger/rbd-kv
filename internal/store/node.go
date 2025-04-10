@@ -16,7 +16,6 @@ import (
 	nerr "github.com/alwaysLinger/rbkv/error"
 	"github.com/alwaysLinger/rbkv/internal/meta"
 	"github.com/alwaysLinger/rbkv/pb"
-	"github.com/dgraph-io/badger/v4"
 	badgerpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/hashicorp/raft"
 	"golang.org/x/sync/errgroup"
@@ -46,23 +45,24 @@ type RaftNode interface {
 }
 
 type Store interface {
-	Get(ctx context.Context, cmd *pb.Command) ([]byte, error)
-	Put(ctx context.Context, cmd *pb.Command) error
-	Delete(ctx context.Context, cmd *pb.Command) error
+	Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
+	Put(ctx context.Context, cmd *pb.Command) (uint64, error)
+	Delete(ctx context.Context, cmd *pb.Command) (uint64, error)
 	LeaderInfo() (string, string, uint64, error)
 	Watch(ctx context.Context, cmd *pb.WatchRequest) (<-chan *pb.Event, error)
 	ClusterStats(ctx context.Context, req *pb.ClusterStatsRequest) (*pb.ClusterStatsResponse, error)
 }
 
 type Node struct {
-	id         string
-	isLeader   *atomic.Bool
-	fsm        DBFSM
-	logStore   *raftbadger.Store
-	raft       *raft.Raft
-	opts       *storeOptions
-	dispatcher *eventDispatcher
-	obCh       chan raft.Observation
+	id                string
+	isLeader          atomic.Bool
+	fsm               DBFSM
+	logStore          *raftbadger.Store
+	raft              *raft.Raft
+	commitIndexTicker *time.Ticker
+	opts              *storeOptions
+	dispatcher        *eventDispatcher
+	obCh              chan raft.Observation
 
 	mu             *sync.RWMutex
 	kvConn         grpc.ClientConnInterface
@@ -74,7 +74,16 @@ type storeOptions struct {
 	WriteTimeout time.Duration
 }
 
-func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
+type getter struct {
+	val []byte
+	ver uint64
+}
+
+func (n *Node) get(key []byte, at uint64, linear bool) ([]byte, uint64, error) {
+	return n.fsm.Get(key, at, linear)
+}
+
+func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, n.opts.ReadTimeout)
@@ -85,65 +94,50 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, error) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		if cmd.Rc == pb.Command_Serializable || cmd.Rc == pb.Command_RCUnknown {
-			val, err := n.get(cmd.Key)
+		if cmd.Rc == pb.Command_RCUnknown || cmd.Rc == pb.Command_Serializable {
+			val, ver, err := n.get(cmd.Kv.Key, cmd.Kv.Version, false)
 			if err != nil {
 				errCh <- err
-			} else {
-				valCh <- val
+				return
 			}
-		} else {
-			if _, id, _, err := n.LeaderInfo(); err != nil {
-				errCh <- err
-			} else {
-				if n.isLeaderWithID(id) {
-					staleTerm := n.raft.CurrentTerm()
-					switch v := n.propose(ctx, cmd).(type) {
-					case []byte:
-						if _, id, term, err := n.LeaderInfo(); err != nil {
-							errCh <- err
-						} else {
-							if n.isLeaderWithID(id) && staleTerm == term {
-								valCh <- v
-							} else {
-								if addr, id, term, err := n.LeaderInfo(); err != nil {
-									errCh <- err
-								} else {
-									errCh <- nerr.NewNodeError(ErrLeaderShipChanged, addr, id, term)
-								}
-							}
-						}
-					case error:
-						errCh <- v
-					default:
-						valCh <- v
-					}
-				} else {
-					resp, err := n.forwardToLeader(ctx, cmd)
-					if err != nil {
-						errCh <- err
-					} else {
-						valCh <- resp.Value
-					}
-				}
-			}
+			valCh <- getter{val: val, ver: ver}
+			return
 		}
+
+		_, oldId, oldTerm, err := n.LeaderInfo()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		val, ver, err := n.get(cmd.Kv.Key, cmd.Kv.Version, !n.isLeaderWithID(oldId))
+		if _, id, term, e := n.LeaderInfo(); e != nil {
+			errCh <- e
+			return
+		} else if id != oldId || term != oldTerm {
+			errCh <- ErrLeaderShipChanged
+			return
+		}
+		if err != nil {
+			errCh <- err
+			return
+		}
+		valCh <- getter{val: val, ver: ver}
 	}()
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, 0, ctx.Err()
 	case val := <-valCh:
 		switch v := val.(type) {
-		case []byte:
-			return v, nil
+		case getter:
+			return v.val, v.ver, nil
 		case error:
-			return nil, v
+			return nil, 0, v
 		default:
-			return nil, fmt.Errorf("unexpected get value: %v", v)
+			return nil, 0, fmt.Errorf("unexpected get value: %v", v)
 		}
 	case err := <-errCh:
-		return nil, err
+		return nil, 0, err
 	}
 }
 
@@ -179,60 +173,41 @@ func (n *Node) forwardToLeader(ctx context.Context, cmd *pb.Command) (*pb.Comman
 	return c.Execute(rctx, cmd)
 }
 
-func (n *Node) get(key []byte) ([]byte, error) {
-	var val []byte
-	err := n.fsm.DB().View(func(txn *badger.Txn) error {
-		item, err := txn.Get(key)
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				return ErrKeyNotFound
-			}
-			return err
-		}
-		val, err = item.ValueCopy(val)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-	return val, nil
-}
-
-func (n *Node) Put(ctx context.Context, cmd *pb.Command) error {
+func (n *Node) Put(ctx context.Context, cmd *pb.Command) (uint64, error) {
 	if _, id, _, err := n.LeaderInfo(); err != nil {
-		return err
+		return 0, err
 	} else {
 		if n.isLeaderWithID(id) {
-			if err, ok := n.propose(ctx, cmd).(error); ok {
-				return err
+			ret := n.propose(ctx, cmd)
+			if err, ok := ret.(error); ok {
+				return 0, err
 			}
-			return nil
+			return ret.(uint64), nil
 		}
-		if _, err := n.forwardToLeader(ctx, cmd); err != nil {
-			return err
+		if ret, err := n.forwardToLeader(ctx, cmd); err != nil {
+			return 0, err
+		} else {
+			return ret.Version, nil
 		}
-		return nil
 	}
 }
 
-func (n *Node) Delete(ctx context.Context, cmd *pb.Command) error {
+func (n *Node) Delete(ctx context.Context, cmd *pb.Command) (uint64, error) {
 	if _, id, _, err := n.LeaderInfo(); err != nil {
-		return err
+		return 0, err
 	} else {
 		if n.isLeaderWithID(id) {
-			if err, ok := n.propose(ctx, cmd).(error); ok {
-				return err
+			ret := n.propose(ctx, cmd)
+			if err, ok := ret.(error); ok {
+				return 0, err
 			}
-			return nil
+			return ret.(uint64), nil
 		}
-		if _, err := n.forwardToLeader(ctx, cmd); err != nil {
-			return err
+		if ret, err := n.forwardToLeader(ctx, cmd); err != nil {
+			return 0, err
+		} else {
+			return ret.Version, nil
 		}
-		return nil
 	}
 }
 
@@ -378,15 +353,6 @@ func (n *Node) Watch(ctx context.Context, cmd *pb.WatchRequest) (<-chan *pb.Even
 	return w.eventCh, nil
 }
 
-type watcherID = string
-
-type watcher struct {
-	id      watcherID
-	filters []badgerpb.Match
-	eventCh chan *pb.Event
-	ctx     context.Context
-}
-
 func (n *Node) newWatcher(ctx context.Context, id watcherID, prefixes [][]byte, capacity int64) *watcher {
 	filters := make([]badgerpb.Match, len(prefixes))
 	for i := range prefixes {
@@ -398,71 +364,6 @@ func (n *Node) newWatcher(ctx context.Context, id watcherID, prefixes [][]byte, 
 		eventCh: make(chan *pb.Event, capacity),
 		ctx:     ctx,
 	}
-}
-
-type eventDispatcher struct {
-	fsm DBFSM
-
-	mu       *sync.RWMutex
-	watchers map[watcherID]*watcher
-}
-
-func newEventDispatcher(fsm DBFSM) *eventDispatcher {
-	return &eventDispatcher{
-		fsm:      fsm,
-		mu:       new(sync.RWMutex),
-		watchers: make(map[watcherID]*watcher),
-	}
-}
-
-func (h *eventDispatcher) add(w *watcher) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.watchers[w.id]; ok {
-		return ErrWatcherIDConflict
-	}
-	h.watchers[w.id] = w
-
-	go func() {
-		ctx, cancel := context.WithCancel(w.ctx)
-		defer func() {
-			cancel()
-			close(w.eventCh)
-			h.mu.Lock()
-			delete(h.watchers, w.id)
-			h.mu.Unlock()
-		}()
-
-		_ = h.fsm.DB().Subscribe(ctx, func(kv *badger.KVList) error {
-			for _, pbKv := range kv.Kv {
-				ckv := pbKv
-				var eventType pb.Event_EventType
-				if len(ckv.Value) == 0 {
-					eventType = pb.Event_Delete
-				} else {
-					eventType = pb.Event_Put
-				}
-				evt := &pb.Event{
-					Type:      eventType,
-					Key:       ckv.Key,
-					Value:     ckv.Value,
-					Version:   ckv.Version,
-					ExpireAt:  ckv.ExpiresAt,
-					WatcherId: w.id,
-				}
-				select {
-				case w.eventCh <- evt:
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-					return ErrWatcherConsumeTooSlow
-				}
-			}
-			return nil
-		}, w.filters)
-	}()
-
-	return nil
 }
 
 func (n *Node) AddPeer(ctx context.Context, id, addr string) error {
@@ -512,7 +413,6 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 		c.MaxAppendEntries = int(batchSize)
 		c.BatchApplyCh = true
 	}
-
 	if err := raft.ValidateConfig(c); err != nil {
 		return err
 	}
@@ -558,6 +458,20 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 	go func() {
 		for c := range n.raft.LeaderCh() {
 			n.isLeader.Store(c)
+		}
+	}()
+
+	// must set heartbeat handler after new raft
+	// transport.SetHeartbeatHandler(func(rpc raft.RPC) {})
+
+	// there is no need to notify fsm with the new committed index within heartbeat callback, it is just not worth it
+	// just simply use a goroutine and try to keep the same interval with leader heartbeat
+	go func() {
+		n.commitIndexTicker = time.NewTicker(c.HeartbeatTimeout / 10)
+		for range n.commitIndexTicker.C {
+			if n.raft.State() == raft.Leader {
+				n.fsm.SyncCommittedIndex(n.raft.CurrentTerm())
+			}
 		}
 	}()
 
@@ -632,6 +546,11 @@ func (n *Node) Close() error {
 			log.Printf("error occurred while keeping peers applied logs aligned: %v\n", err)
 		}
 	}
+
+	if n.commitIndexTicker != nil {
+		n.commitIndexTicker.Stop()
+	}
+
 	sf := n.raft.Shutdown()
 	if err := sf.Error(); err != nil {
 		log.Printf("error occurred while shutting down raft: %v\n", err)
@@ -652,7 +571,6 @@ func NewNode(id string, fsm DBFSM) *Node {
 	obCh := make(chan raft.Observation, 100)
 	n := &Node{
 		id:         id,
-		isLeader:   new(atomic.Bool),
 		fsm:        fsm,
 		opts:       opts,
 		dispatcher: dispatcher,

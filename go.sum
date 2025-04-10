@@ -13,6 +13,8 @@ github.com/alwaysLinger/raft-badgerdb v0.0.0-20250331145740-29aef7c51ccd h1:q/7h
 github.com/alwaysLinger/raft-badgerdb v0.0.0-20250331145740-29aef7c51ccd/go.mod h1:KWHPaRAYq7SSRBXQLTjbKhOqAQCxhzqQ6d6TXycbX7w=
 github.com/alwaysLinger/raft-badgerdb v0.0.0-20250331171324-88108559fe0f h1:inKVKWYVDxPLBYcaOYCRal2RHNEwI2keGU5zRQJI9E8=
 github.com/alwaysLinger/raft-badgerdb v0.0.0-20250331171324-88108559fe0f/go.mod h1:KWHPaRAYq7SSRBXQLTjbKhOqAQCxhzqQ6d6TXycbX7w=
+github.com/alwaysLinger/raft-badgerdb v0.0.0-20250409155227-25618547a042 h1:Ley1hEnVFTegGZshlEfy2Mrb0iap7oKya7MzPQOSEx0=
+github.com/alwaysLinger/raft-badgerdb v0.0.0-20250409155227-25618547a042/go.mod h1:KWHPaRAYq7SSRBXQLTjbKhOqAQCxhzqQ6d6TXycbX7w=
 github.com/armon/go-metrics v0.4.1 h1:hR91U9KYmb6bLBYLQjyM+3j+rcd/UhE+G78SFnF8gJA=
 github.com/armon/go-metrics v0.4.1/go.mod h1:E6amYzXo6aW1tqzoZGT755KkbgrJsSdpwZ+3JqfkOG4=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=

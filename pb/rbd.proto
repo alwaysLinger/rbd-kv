@@ -28,16 +28,22 @@ message Command {
     Linearizable = 2;
   }
 
+  message KV {
+    bytes key = 1;
+    uint64 version = 2;
+    bytes value = 3;
+    google.protobuf.Duration ttl = 4;
+  }
+
   OpType op = 1;
   ReadConsistency rc = 2;
-  bytes key = 3;
-  bytes value = 4;
-  google.protobuf.Duration ttl = 5;
+  KV kv = 3;
 }
 
 message CommandResponse {
   bytes key = 1;
   bytes value = 2;
+  uint64 version = 3;
 }
 
 message WatchRequest {
