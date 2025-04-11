@@ -324,7 +324,7 @@ func TestFSMTxn(t *testing.T) {
 		}
 
 		val, _, err = fsm.ReadAt(key, at-1)
-		if !errors.Is(err.(error), ErrNotFound) {
+		if !errors.Is(err.(error), ErrKeyNotFound) {
 			t.Fatalf("ReadAt before at failed: %v", err)
 		}
 
@@ -354,7 +354,7 @@ func TestFSMTxn(t *testing.T) {
 		}
 
 		_, _, err = fsm.ReadAt(key, at+2)
-		if !errors.Is(err.(error), ErrNotFound) {
+		if !errors.Is(err.(error), ErrKeyNotFound) {
 			t.Error("ReadAt should fail after Delete")
 		}
 	})
@@ -391,7 +391,7 @@ func TestFSMTxn(t *testing.T) {
 		}
 
 		_, _, err = fsm.ReadAt(key, aat+20)
-		if !errors.Is(err.(error), ErrNotFound) {
+		if !errors.Is(err.(error), ErrKeyNotFound) {
 			t.Error("ReadAt should fail after Delete high version")
 		}
 
@@ -497,8 +497,8 @@ func TestFSMTxn(t *testing.T) {
 		}
 
 		_, _, err = fsm.ReadAt([]byte("write-key2"), baseTs+30)
-		if !errors.Is(err, ErrNotFound) {
-			t.Errorf("Expected ErrNotFound for write-key2 after delete, got: %v", err)
+		if !errors.Is(err, ErrKeyNotFound) {
+			t.Errorf("Expected ErrKeyNotFound for write-key2 after delete, got: %v", err)
 		}
 
 		val3, _, err := fsm.ReadAt([]byte("write-key3"), baseTs+30)

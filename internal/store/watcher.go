@@ -2,11 +2,18 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/dgraph-io/badger/v4"
 	badgerpb "github.com/dgraph-io/badger/v4/pb"
+)
+
+var (
+	ErrWatcherIDConflict     = errors.New("watcher already exists")
+	ErrWatcherConsumeTooSlow = errors.New("watcher consume too slow")
+	ErrWatcherClosed         = errors.New("watcher closed")
 )
 
 type watcherID = string

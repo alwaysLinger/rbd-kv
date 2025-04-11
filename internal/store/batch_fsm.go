@@ -12,8 +12,8 @@ type BatchFSM struct {
 	fsm *FSM
 }
 
-func (b *BatchFSM) Get(key []byte, at uint64, linear bool) ([]byte, uint64, error) {
-	return b.fsm.Get(key, at, linear)
+func (b *BatchFSM) Get(key []byte, at uint64) (Getter, error) {
+	return b.fsm.Get(key, at)
 }
 
 func (b *BatchFSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
@@ -30,10 +30,6 @@ func (b *BatchFSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
 
 func (b *BatchFSM) Delete(key []byte, ts uint64) any {
 	return b.fsm.Delete(key, ts)
-}
-
-func (b *BatchFSM) SyncCommittedIndex(commitIndex uint64) {
-	b.fsm.SyncCommittedIndex(commitIndex)
 }
 
 func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {

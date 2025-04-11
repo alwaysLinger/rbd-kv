@@ -24,15 +24,9 @@ import (
 )
 
 var (
-	ErrKeyNotFound       = errors.New("key not found")
 	ErrNotLeader         = errors.New("not leader")
 	ErrLeaderShipChanged = errors.New("leader changed")
 	ErrNoLeader          = errors.New("no leader found within the cluster for now")
-
-	ErrWatcherIDConflict     = errors.New("watcher already exists")
-	ErrWatcherConsumeTooSlow = errors.New("watcher consume too slow")
-	ErrWatcherClosed         = errors.New("watcher closed")
-
 	ErrLeaderConnChanged = errors.New("leader changed while forward cmd to leader")
 )
 
@@ -54,15 +48,14 @@ type Store interface {
 }
 
 type Node struct {
-	id                string
-	isLeader          atomic.Bool
-	fsm               DBFSM
-	logStore          *raftbadger.Store
-	raft              *raft.Raft
-	commitIndexTicker *time.Ticker
-	opts              *storeOptions
-	dispatcher        *eventDispatcher
-	obCh              chan raft.Observation
+	id         string
+	isLeader   atomic.Bool
+	fsm        DBFSM
+	logStore   *raftbadger.Store
+	raft       *raft.Raft
+	opts       *storeOptions
+	dispatcher *eventDispatcher
+	obCh       chan raft.Observation
 
 	mu             *sync.RWMutex
 	kvConn         grpc.ClientConnInterface
@@ -74,13 +67,8 @@ type storeOptions struct {
 	WriteTimeout time.Duration
 }
 
-type getter struct {
-	val []byte
-	ver uint64
-}
-
-func (n *Node) get(key []byte, at uint64, linear bool) ([]byte, uint64, error) {
-	return n.fsm.Get(key, at, linear)
+func (n *Node) get(key []byte, at uint64) (Getter, error) {
+	return n.fsm.Get(key, at)
 }
 
 func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error) {
@@ -95,12 +83,12 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
 
 	go func() {
 		if cmd.Rc == pb.Command_RCUnknown || cmd.Rc == pb.Command_Serializable {
-			val, ver, err := n.get(cmd.Kv.Key, cmd.Kv.Version, false)
+			get, err := n.get(cmd.Kv.Key, cmd.Kv.Version)
 			if err != nil {
 				errCh <- err
 				return
 			}
-			valCh <- getter{val: val, ver: ver}
+			valCh <- get
 			return
 		}
 
@@ -109,19 +97,40 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
 			errCh <- err
 			return
 		}
-		val, ver, err := n.get(cmd.Kv.Key, cmd.Kv.Version, !n.isLeaderWithID(oldId))
-		if _, id, term, e := n.LeaderInfo(); e != nil {
-			errCh <- e
-			return
-		} else if id != oldId || term != oldTerm {
-			errCh <- ErrLeaderShipChanged
-			return
+
+		var (
+			ret any
+			e   error
+		)
+
+		if n.isLeaderWithID(oldId) {
+			ret = n.propose(ctx, cmd)
+		} else {
+			var resp *pb.CommandResponse
+			resp, e = n.forwardToLeader(ctx, cmd)
+			if e == nil && resp != nil {
+				ret = getter{val: resp.Value, ver: resp.Version}
+			}
 		}
+
+		_, id, term, err := n.LeaderInfo()
 		if err != nil {
 			errCh <- err
 			return
 		}
-		valCh <- getter{val: val, ver: ver}
+		if oldId != id || oldTerm != term {
+			errCh <- ErrLeaderShipChanged
+			return
+		}
+		if e != nil {
+			errCh <- e
+			return
+		}
+		if err, ok := ret.(error); ok {
+			errCh <- err
+			return
+		}
+		valCh <- ret
 	}()
 
 	select {
@@ -129,8 +138,8 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
 		return nil, 0, ctx.Err()
 	case val := <-valCh:
 		switch v := val.(type) {
-		case getter:
-			return v.val, v.ver, nil
+		case Getter:
+			return v.Val(), v.Version(), nil
 		case error:
 			return nil, 0, v
 		default:
@@ -464,17 +473,6 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 	// must set heartbeat handler after new raft
 	// transport.SetHeartbeatHandler(func(rpc raft.RPC) {})
 
-	// there is no need to notify fsm with the new committed index within heartbeat callback, it is just not worth it
-	// just simply use a goroutine and try to keep the same interval with leader heartbeat
-	go func() {
-		n.commitIndexTicker = time.NewTicker(c.HeartbeatTimeout / 10)
-		for range n.commitIndexTicker.C {
-			if n.raft.State() == raft.Leader {
-				n.fsm.SyncCommittedIndex(n.raft.CurrentTerm())
-			}
-		}
-	}()
-
 	r.RegisterObserver(observer)
 
 	if len(joinAddr) == 0 {
@@ -546,11 +544,6 @@ func (n *Node) Close() error {
 			log.Printf("error occurred while keeping peers applied logs aligned: %v\n", err)
 		}
 	}
-
-	if n.commitIndexTicker != nil {
-		n.commitIndexTicker.Stop()
-	}
-
 	sf := n.raft.Shutdown()
 	if err := sf.Error(); err != nil {
 		log.Printf("error occurred while shutting down raft: %v\n", err)

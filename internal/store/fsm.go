@@ -8,7 +8,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,8 +28,9 @@ var (
 	consistentIndexKey = []byte("m.!ci")
 
 	ErrUpdateConsistentIndex = errors.New("error occurred while update consistent index")
-	ErrNotFound              = errors.New("key not found")
+	ErrKeyNotFound           = errors.New("key not found")
 	ErrReadTxn               = errors.New("error occurred while read txn")
+	ErrLinearReadTxn         = errors.New("error occurred while linear read txn")
 	ErrDeleteTxn             = errors.New("error occurred while delete txn")
 	ErrUpdateTxn             = errors.New("error occurred while update txn")
 	ErrCommitTxn             = errors.New("error occurred while commit txn")
@@ -47,9 +47,26 @@ type Txn interface {
 	Delete(key []byte, ts uint64) any
 }
 
+type Getter interface {
+	Val() []byte
+	Version() uint64
+}
+
+type getter struct {
+	val []byte
+	ver uint64
+}
+
+func (g getter) Val() []byte {
+	return g.val
+}
+
+func (g getter) Version() uint64 {
+	return g.ver
+}
+
 type DBFSM interface {
-	SyncCommittedIndex(commitIndex uint64)
-	Get(key []byte, at uint64, linear bool) ([]byte, uint64, error)
+	Get(key []byte, at uint64) (Getter, error)
 	Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint64, err error)
 	Close() error
 
@@ -62,10 +79,6 @@ type FSM struct {
 	db           *badger.DB
 	gcTicker     *time.Ticker
 	appliedIndex atomic.Uint64
-
-	mu             sync.Mutex
-	cond           *sync.Cond
-	committedIndex uint64
 }
 
 func OpenFSM(dir string, opts *badger.Options, versionKept int) (*FSM, error) {
@@ -94,7 +107,6 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int) (*FSM, error) {
 		return nil, err
 	}
 	s.db = db
-	s.cond = sync.NewCond(&s.mu)
 
 	if err := s.loadAppliedIndexFromDB(); err != nil {
 		return nil, err
@@ -144,49 +156,22 @@ func (s *FSM) DB() *badger.DB {
 	return s.db
 }
 
-func (s *FSM) SyncCommittedIndex(commitIndex uint64) {
-	s.mu.Lock()
-	s.committedIndex = commitIndex
-	s.mu.Unlock()
-	s.cond.Broadcast()
-}
-
-func (s *FSM) waitForIndexAligned() <-chan struct{} {
-	s.mu.Lock()
-	cidx := s.committedIndex
-	s.mu.Unlock()
-	if s.appliedIndex.Load() >= cidx {
-		return nil
-	}
-
-	ch := make(chan struct{}, 1)
-	go func() {
-		s.mu.Lock()
-		if s.appliedIndex.Load() >= s.committedIndex {
-			s.mu.Unlock()
-			close(ch)
-			return
-		}
-		for s.appliedIndex.Load() < s.committedIndex {
-			s.cond.Wait()
-		}
-		s.mu.Unlock()
-		close(ch)
-	}()
-	return ch
-}
-
-func (s *FSM) Get(key []byte, at uint64, linear bool) ([]byte, uint64, error) {
+func (s *FSM) Get(key []byte, at uint64) (Getter, error) {
 	if at == 0 {
 		at = math.MaxUint64
 	}
-	if !linear {
-		return s.ReadAt(key, at)
+	return s.get(key, at)
+}
+
+func (s *FSM) get(key []byte, at uint64) (Getter, error) {
+	val, ver, err := s.ReadAt(key, at)
+	if err != nil {
+		return nil, err
 	}
-	if ch := s.waitForIndexAligned(); ch != nil {
-		<-ch
-	}
-	return s.ReadAt(key, at)
+	return getter{
+		val: val,
+		ver: ver,
+	}, nil
 }
 
 func (s *FSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
@@ -195,7 +180,7 @@ func (s *FSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
 	item, err := txn.Get(key)
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, 0, fmt.Errorf("%w: key %s at %d", ErrNotFound, key, at)
+			return nil, 0, fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
 		}
 		return nil, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
 	}
@@ -212,18 +197,20 @@ func (s *FSM) Write(kvs any) []any {
 	}
 	ret := make([]any, len(logs))
 	for i, l := range logs {
-		ret[i] = s.Apply(l)
+		ret[i] = s.apply(l)
 	}
 	return ret
 }
 
-func (s *FSM) update(ts uint64, f func(txn *badger.Txn) error) error {
+func (s *FSM) update(at, ts uint64, f func(txn *badger.Txn) error) error {
 	if ts == 0 {
-		return nil
+		panic("no ts provided")
 	}
-	txn := s.db.NewTransactionAt(ts, true)
+	txn := s.db.NewTransactionAt(at, true)
 	defer txn.Discard()
-
+	if err := s.syncConsistentIndex(txn, ts); err != nil {
+		return err
+	}
 	err := f(txn)
 	if errors.Is(err, badger.ErrTxnTooBig) {
 		log.Printf("ErrTxnTooBig occurred while set a kv pair: %v\n", err)
@@ -238,6 +225,12 @@ func (s *FSM) update(ts uint64, f func(txn *badger.Txn) error) error {
 	return nil
 }
 
+func (s *FSM) updateNop(ts uint64) error {
+	return s.update(ts, ts, func(txn *badger.Txn) error {
+		return nil
+	})
+}
+
 func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
 	if err := txn.SetEntry(badger.NewEntry(consistentIndexKey, uint64ToBytes(ts)).WithDiscard()); err != nil {
 		return fmt.Errorf("%w: %w", ErrUpdateConsistentIndex, err)
@@ -245,11 +238,43 @@ func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
 	return nil
 }
 
-func (s *FSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
-	err := s.update(ts, func(txn *badger.Txn) error {
-		if err := s.syncConsistentIndex(txn, ts); err != nil {
-			return err
+func (s *FSM) linearRead(key []byte, at, ts uint64) (Getter, error) {
+	if at == 0 {
+		at = math.MaxUint64
+	}
+	var (
+		val []byte
+		ver uint64
+	)
+	err := s.update(at, ts, func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
+			}
+			return fmt.Errorf("%w: key %s at %d: %w", ErrLinearReadTxn, key, at, err)
 		}
+		if val, err = item.ValueCopy(val); err != nil {
+			return fmt.Errorf("%w: key %s at %d: %w", ErrLinearReadTxn, key, at, err)
+		}
+		ver = item.Version()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return getter{
+		val: val,
+		ver: ver,
+	}, nil
+}
+
+func (s *FSM) put(key, val []byte, ttl time.Duration, ts uint64) any {
+	return s.SetAt(key, val, ttl, ts)
+}
+
+func (s *FSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
+	err := s.update(ts, ts, func(txn *badger.Txn) error {
 		ent := badger.NewEntry(key, val)
 		if ttl != 0 {
 			ent.WithTTL(ttl)
@@ -262,11 +287,12 @@ func (s *FSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
 	return ts
 }
 
+func (s *FSM) del(key []byte, ts uint64) any {
+	return s.Delete(key, ts)
+}
+
 func (s *FSM) Delete(key []byte, ts uint64) any {
-	err := s.update(ts, func(txn *badger.Txn) error {
-		if err := s.syncConsistentIndex(txn, ts); err != nil {
-			return err
-		}
+	err := s.update(ts, ts, func(txn *badger.Txn) error {
 		return txn.Delete(key)
 	})
 	if err != nil {
@@ -281,11 +307,19 @@ func uint64ToBytes(u uint64) []byte {
 	return buf
 }
 
-func (s *FSM) Apply(log *raft.Log) interface{} {
+func (s *FSM) apply(log *raft.Log) any {
+	defer func() {
+		if s.appliedIndex.Load() < log.Index {
+			s.appliedIndex.Store(log.Index)
+		}
+	}()
 	if s.appliedIndex.Load() >= log.Index {
 		return nil
-	} else {
-		s.appliedIndex.Store(log.Index)
+	}
+
+	if log.Type != raft.LogCommand {
+		_ = s.updateNop(log.Index)
+		return nil
 	}
 
 	cmd := &pb.Command{}
@@ -295,17 +329,27 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 	}
 
 	switch cmd.Op {
+	case pb.Command_Get:
+		if ret, err := s.linearRead(cmd.Kv.Key, cmd.Kv.Version, log.Index); err != nil {
+			return err
+		} else {
+			return ret
+		}
 	case pb.Command_Put:
 		var ttl time.Duration
 		if cmd.Kv.Ttl != nil {
 			ttl = cmd.Kv.Ttl.AsDuration()
 		}
-		return s.SetAt(cmd.Kv.Key, cmd.Kv.Value, ttl, log.Index)
+		return s.put(cmd.Kv.Key, cmd.Kv.Value, ttl, log.Index)
 	case pb.Command_Delete:
-		return s.Delete(cmd.Kv.Key, log.Index)
+		return s.del(cmd.Kv.Key, log.Index)
 	default:
 		panic("not excepted command operation")
 	}
+}
+
+func (s *FSM) Apply(log *raft.Log) interface{} {
+	return s.apply(log)
 }
 
 func (s *FSM) Snapshot() (raft.FSMSnapshot, error) {
