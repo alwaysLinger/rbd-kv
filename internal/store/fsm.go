@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	backUpGoNum  = 16
-	restoreGoNum = 16
+	backUpGoNum  = 64
+	restoreGoNum = 64
 
 	maxVersionKept = 1000
 )
