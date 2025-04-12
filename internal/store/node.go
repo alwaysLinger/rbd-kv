@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 
 	raftbadger "github.com/alwaysLinger/raft-badgerdb"
 	nerr "github.com/alwaysLinger/rbkv/error"
+	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/alwaysLinger/rbkv/internal/meta"
 	"github.com/alwaysLinger/rbkv/pb"
 	badgerpb "github.com/dgraph-io/badger/v4/pb"
@@ -58,6 +58,7 @@ type Node struct {
 	opts       *storeOptions
 	dispatcher *eventDispatcher
 	obCh       chan raft.Observation
+	logger     log.Logger
 
 	mu             *sync.RWMutex
 	kvConn         grpc.ClientConnInterface
@@ -500,7 +501,7 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 		var recoverable bool
 		var err error
 		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
-			log.Printf("%v, current node self recovery may fail, try bootstrap the cluster", err)
+			n.logger.Warn("node self recovery may fail, try bootstrap the cluster", log.Error(err))
 			recoverable = true
 		}
 		if recoverable && err == nil {
@@ -521,7 +522,7 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 		var recoverable bool
 		var err error
 		if recoverable, err = raft.HasExistingState(logStore, stableStore, snapshots); err != nil {
-			log.Printf("%v, current node self recovery may fail, try join the cluster", err)
+			n.logger.Warn("node self recovery may fail, try bootstrap the cluster", log.Error(err))
 			recoverable = true
 		}
 		if recoverable && err == nil {
@@ -562,27 +563,30 @@ func (n *Node) Close() error {
 	if n.isLeader.Load() {
 		bf := n.raft.Barrier(30 * time.Second)
 		if err := bf.Error(); err != nil {
-			log.Printf("closing: error occurred while waiting FSM applying logs aligned with inflight logs: %v\n", err)
+			n.logger.Error("closing: error occurred while waiting FSM applying logs aligned with inflight logs", log.Error(err))
 		}
 	}
 	sf := n.raft.Shutdown()
 	if err := sf.Error(); err != nil {
-		log.Printf("error occurred while shutting down raft: %v\n", err)
+		n.logger.Error("error occurred while shutting down raft", log.Error(err))
 	}
 
 	if err := n.logStore.Close(); err != nil {
-		log.Printf("error occurred while closing raft log storage: %v\n", err)
+		n.logger.Error("error occurred while closing raft log storage", log.Error(err))
 	}
 	return n.fsm.Close()
 }
 
-func NewNode(id string, fsm DBFSM) *Node {
+func NewNode(id string, fsm DBFSM, logger log.Logger) *Node {
 	dispatcher := newEventDispatcher(fsm)
 	opts := &storeOptions{
 		ReadTimeout:  2000 * time.Millisecond,
 		WriteTimeout: 3000 * time.Millisecond,
 	}
 	obCh := make(chan raft.Observation, 100)
+	if logger == nil {
+		logger = log.NopLogger
+	}
 	n := &Node{
 		id:         id,
 		fsm:        fsm,
@@ -590,11 +594,16 @@ func NewNode(id string, fsm DBFSM) *Node {
 		dispatcher: dispatcher,
 		obCh:       obCh,
 		mu:         new(sync.RWMutex),
+		logger:     logger,
 	}
 	go func() {
 		for ob := range obCh {
 			if e, ok := ob.Data.(raft.LeaderObservation); ok {
-				_ = n.setKVConn(string(e.LeaderID))
+				if err := n.setKVConn(string(e.LeaderID)); err != nil {
+					n.logger.Error("failed to set KV connection to leader",
+						log.String("leader_id", string(e.LeaderID)),
+						log.Error(err))
+				}
 			}
 		}
 	}()

@@ -39,8 +39,7 @@ func (m *mockSnapshotSink) Close() error {
 func TestFSMSnapshotAndRestore(t *testing.T) {
 	dir := filepath.Join("/tmp", "fsm-snapshot-test")
 	defer os.RemoveAll(dir)
-
-	fsm, err := OpenFSM(dir, nil, 0)
+	fsm, err := OpenFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +85,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 		t.Error("snapshot sink Close() was not called")
 	}
 
-	restoreFSM, err := OpenFSM(filepath.Join(dir, "restore"), nil, 0)
+	restoreFSM, err := OpenFSM(filepath.Join(dir, "restore"), nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +119,7 @@ func TestFSMSnapshotAndRestore(t *testing.T) {
 func TestConsistentIndex(t *testing.T) {
 	dir := filepath.Join("/tmp", "fsm-consistent-index-test")
 	defer os.RemoveAll(dir)
-	fsm, err := OpenFSM(dir, nil, 0)
+	fsm, err := OpenFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +187,7 @@ func TestConsistentIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restartedFSM, err := OpenFSM(dir, nil, 0)
+	restartedFSM, err := OpenFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +235,7 @@ func TestConsistentIndex(t *testing.T) {
 func BenchmarkApply(b *testing.B) {
 	dir := filepath.Join("/tmp", "apply")
 	defer os.RemoveAll(dir)
-	fsm, err := OpenFSM(dir, nil, 0)
+	fsm, err := OpenFSM(dir, nil, 0, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -267,7 +266,7 @@ func BenchmarkApply(b *testing.B) {
 
 func TestFSMTxn(t *testing.T) {
 	dir := filepath.Join("/tmp", "fsm-txn-test")
-	fsm, err := OpenFSM(dir, nil, 0)
+	fsm, err := OpenFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

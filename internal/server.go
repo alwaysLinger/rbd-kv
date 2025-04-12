@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/alwaysLinger/rbkv/internal/service"
 	storage "github.com/alwaysLinger/rbkv/internal/store"
 	"golang.org/x/sync/errgroup"
@@ -17,9 +18,10 @@ const maxRaftLogBatchSize uint64 = 500
 var ErrOptsCheckFailed = errors.New("options check failed")
 
 type Server struct {
-	ops   *Options
-	n     storage.RaftNode
-	kvSvc *service.KVService
+	ops    *Options
+	n      storage.RaftNode
+	kvSvc  *service.KVService
+	logger log.Logger
 }
 
 type Options struct {
@@ -42,27 +44,32 @@ func NewServer(opts *Options) (*Server, error) {
 		return nil, err
 	}
 
+	logger, err := log.NewLogger()
+	if err != nil {
+		return nil, fmt.Errorf("init logger failed: %w", err)
+	}
+
 	var fsm storage.DBFSM
-	var err error
 	if opts.BatchSize > 0 {
-		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep)
+		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger)
 	} else {
-		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep)
+		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	n := storage.NewNode(opts.NodeID, fsm)
+	n := storage.NewNode(opts.NodeID, fsm, logger)
 	if err := n.WithRaft(opts.RaftAddr, opts.JoinAddr, opts.LogDir, opts.BatchSize); err != nil {
 		return nil, err
 	}
 
 	kvSvc := service.NewKVService(n, n)
 	s := &Server{
-		ops:   opts,
-		n:     n,
-		kvSvc: kvSvc,
+		ops:    opts,
+		n:      n,
+		kvSvc:  kvSvc,
+		logger: logger,
 	}
 	return s, nil
 }
@@ -106,10 +113,13 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Close() error {
+	defer s.logger.Sync()
 	if err := s.kvSvc.Stop(); err != nil {
+		s.logger.Error("failed to stop KV service", log.Error(err))
 		return err
 	}
 	if err := s.n.Close(); err != nil {
+		s.logger.Error("failed to close node", log.Error(err))
 		return err
 	}
 	return nil
