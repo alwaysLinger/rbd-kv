@@ -1,9 +1,15 @@
 package store
 
 import (
+	"errors"
+	"fmt"
+	"log"
+
 	"github.com/dgraph-io/badger/v4"
 	"github.com/hashicorp/raft"
 )
+
+var ErrSnapshotPersist = errors.New("snapshot persist failed")
 
 type badgerSnapshot struct {
 	db *badger.DB
@@ -11,10 +17,14 @@ type badgerSnapshot struct {
 }
 
 func (bs *badgerSnapshot) Persist(sink raft.SnapshotSink) error {
-	if _, err := bs.db.NewStreamAt(bs.ts).Backup(sink, 0); err != nil {
+	log.Printf("start dumping from BadgerDB at %d\n", bs.ts)
+	lastIndex, err := bs.db.NewStreamAt(bs.ts).Backup(sink, 0)
+	if err != nil {
 		_ = sink.Cancel()
-		return err
+		log.Printf("dump failed: %v\n", err)
+		return fmt.Errorf("%w: %w", ErrSnapshotPersist, err)
 	}
+	log.Printf("successfully dumped, last dumped log entry index is %d\n", lastIndex)
 	return sink.Close()
 }
 

@@ -8,7 +8,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/alwaysLinger/rbkv/pb"
@@ -33,6 +32,7 @@ var (
 	ErrDeleteTxn             = errors.New("error occurred while delete txn")
 	ErrUpdateTxn             = errors.New("error occurred while update txn")
 	ErrCommitTxn             = errors.New("error occurred while commit txn")
+	ErrRestore               = errors.New("restore failed")
 )
 
 type DB interface {
@@ -77,7 +77,7 @@ type DBFSM interface {
 type FSM struct {
 	db           *badger.DB
 	gcTicker     *time.Ticker
-	appliedIndex atomic.Uint64
+	appliedIndex uint64 // this field will never be accessed concurrently
 }
 
 func OpenFSM(dir string, opts *badger.Options, versionKept int) (*FSM, error) {
@@ -125,7 +125,7 @@ func (s *FSM) loadAppliedIndexFromDB() error {
 		return nil
 	} else {
 		_ = item.Value(func(val []byte) error {
-			s.appliedIndex.Store(binary.BigEndian.Uint64(val))
+			s.appliedIndex = binary.BigEndian.Uint64(val)
 			return nil
 		})
 	}
@@ -176,6 +176,7 @@ func (s *FSM) get(key []byte, at uint64) (Getter, error) {
 func (s *FSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
 	var val []byte
 	txn := s.db.NewTransactionAt(at, false)
+	defer txn.Discard()
 	item, err := txn.Get(key)
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
@@ -201,21 +202,23 @@ func (s *FSM) Write(kvs any) []any {
 	return ret
 }
 
-func (s *FSM) update(at, ts uint64, f func(txn *badger.Txn) error) error {
+func (s *FSM) update(ts uint64, f func(txn *badger.Txn) error) error {
 	if ts == 0 {
 		panic("no ts provided")
 	}
-	txn := s.db.NewTransactionAt(at, true)
+	txn := s.db.NewTransactionAt(math.MaxUint64, true)
 	defer txn.Discard()
 	if err := s.syncConsistentIndex(txn, ts); err != nil {
 		return err
 	}
-	err := f(txn)
-	if errors.Is(err, badger.ErrTxnTooBig) {
-		log.Printf("ErrTxnTooBig occurred while set a kv pair: %v\n", err)
-	} else if err != nil {
-		log.Printf("err occurred while update txn: %v\n", err)
-		return err
+	if f != nil {
+		err := f(txn)
+		if errors.Is(err, badger.ErrTxnTooBig) {
+			log.Printf("ErrTxnTooBig occurred while set a kv pair: %v\n", err)
+		} else if err != nil {
+			log.Printf("err occurred while update txn: %v\n", err)
+			return err
+		}
 	}
 	if err := txn.CommitAt(ts, nil); err != nil {
 		log.Printf("err occurred while commit txn: %v\n", err)
@@ -225,9 +228,7 @@ func (s *FSM) update(at, ts uint64, f func(txn *badger.Txn) error) error {
 }
 
 func (s *FSM) updateNop(ts uint64) error {
-	return s.update(ts, ts, func(txn *badger.Txn) error {
-		return nil
-	})
+	return s.update(ts, nil)
 }
 
 func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
@@ -242,7 +243,7 @@ func (s *FSM) put(key, val []byte, ttl time.Duration, ts uint64) any {
 }
 
 func (s *FSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
-	err := s.update(ts, ts, func(txn *badger.Txn) error {
+	err := s.update(ts, func(txn *badger.Txn) error {
 		ent := badger.NewEntry(key, val)
 		if ttl != 0 {
 			ent.WithTTL(ttl)
@@ -260,7 +261,7 @@ func (s *FSM) del(key []byte, ts uint64) any {
 }
 
 func (s *FSM) Delete(key []byte, ts uint64) any {
-	err := s.update(ts, ts, func(txn *badger.Txn) error {
+	err := s.update(ts, func(txn *badger.Txn) error {
 		return txn.Delete(key)
 	})
 	if err != nil {
@@ -276,14 +277,14 @@ func uint64ToBytes(u uint64) []byte {
 }
 
 func (s *FSM) apply(log *raft.Log) any {
-	defer func() {
-		if s.appliedIndex.Load() < log.Index {
-			s.appliedIndex.Store(log.Index)
-		}
-	}()
-	if s.appliedIndex.Load() >= log.Index {
+	if s.appliedIndex >= log.Index {
 		return nil
 	}
+	defer func() {
+		if s.appliedIndex < log.Index {
+			s.appliedIndex = log.Index
+		}
+	}()
 
 	if log.Type != raft.LogCommand {
 		_ = s.updateNop(log.Index)
@@ -315,22 +316,24 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 }
 
 func (s *FSM) Snapshot() (raft.FSMSnapshot, error) {
-	return &badgerSnapshot{db: s.db, ts: s.appliedIndex.Load()}, nil
+	return &badgerSnapshot{db: s.db, ts: s.appliedIndex}, nil
 }
 
 func (s *FSM) Restore(snapshot io.ReadCloser) error {
+	log.Println("start restoring")
 	if err := s.db.DropAll(); err != nil {
-		return err
+		log.Printf("restore failed: %v\n", err)
+		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
-
 	if err := s.db.Load(snapshot, restoreGoNum); err != nil {
-		return err
+		log.Printf("restore failed: %v\n", err)
+		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
-
 	if err := s.loadAppliedIndexFromDB(); err != nil {
+		log.Printf("restore failed: %v\n", err)
 		return err
 	}
-
+	log.Printf("successfully restored at log index %d\n", s.appliedIndex)
 	return nil
 }
 

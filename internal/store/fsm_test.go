@@ -145,8 +145,8 @@ func TestConsistentIndex(t *testing.T) {
 		}
 	}
 
-	if fsm.appliedIndex.Load() != uint64(numEntries) {
-		t.Errorf("appliedIndex not updated correctly: expected %d, got %d", numEntries, fsm.appliedIndex.Load())
+	if fsm.appliedIndex != uint64(numEntries) {
+		t.Errorf("appliedIndex not updated correctly: expected %d, got %d", numEntries, fsm.appliedIndex)
 	}
 
 	oldCmd := &pb.Command{
@@ -163,8 +163,8 @@ func TestConsistentIndex(t *testing.T) {
 		t.Errorf("applying old log should be ignored, but returned error: %v", err)
 	}
 
-	if fsm.appliedIndex.Load() != uint64(numEntries) {
-		t.Errorf("appliedIndex changed after applying old log: expected %d, got %d", numEntries, fsm.appliedIndex.Load())
+	if fsm.appliedIndex != uint64(numEntries) {
+		t.Errorf("appliedIndex changed after applying old log: expected %d, got %d", numEntries, fsm.appliedIndex)
 	}
 
 	var oldVal []byte
@@ -194,8 +194,8 @@ func TestConsistentIndex(t *testing.T) {
 	}
 	defer restartedFSM.Close()
 
-	if restartedFSM.appliedIndex.Load() != uint64(numEntries) {
-		t.Errorf("appliedIndex not restored correctly after restart: expected %d, got %d", numEntries, restartedFSM.appliedIndex.Load())
+	if restartedFSM.appliedIndex != uint64(numEntries) {
+		t.Errorf("appliedIndex not restored correctly after restart: expected %d, got %d", numEntries, restartedFSM.appliedIndex)
 	}
 
 	newCmd := &pb.Command{
@@ -212,8 +212,8 @@ func TestConsistentIndex(t *testing.T) {
 		t.Errorf("failed to apply new log after restart: %v", err)
 	}
 
-	if restartedFSM.appliedIndex.Load() != uint64(numEntries+1) {
-		t.Errorf("appliedIndex not updated correctly after restart: expected %d, got %d", numEntries+1, restartedFSM.appliedIndex.Load())
+	if restartedFSM.appliedIndex != uint64(numEntries+1) {
+		t.Errorf("appliedIndex not updated correctly after restart: expected %d, got %d", numEntries+1, restartedFSM.appliedIndex)
 	}
 
 	var val []byte

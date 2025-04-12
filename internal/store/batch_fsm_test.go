@@ -221,9 +221,9 @@ func TestBatchApply(t *testing.T) {
 		t.Errorf("Apply with old index should be ignored, not return error")
 	}
 
-	if batchFSM.fsm.appliedIndex.Load() != mixedLogs[2].Index {
+	if batchFSM.fsm.appliedIndex != mixedLogs[2].Index {
 		t.Errorf("appliedIndex not updated correctly: got %d, want %d",
-			batchFSM.fsm.appliedIndex.Load(), mixedLogs[2].Index)
+			batchFSM.fsm.appliedIndex, mixedLogs[2].Index)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestBatchAppliedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	initialIndex := batchFSM.fsm.appliedIndex.Load()
+	initialIndex := batchFSM.fsm.appliedIndex
 	if initialIndex != 0 {
 		t.Errorf("initial appliedIndex should be 0, got %d", initialIndex)
 	}
@@ -266,8 +266,8 @@ func TestBatchAppliedIndex(t *testing.T) {
 	_ = batchFSM.ApplyBatch(logs)
 
 	expectedIndex := logs[batchSize-1].Index
-	if batchFSM.fsm.appliedIndex.Load() != expectedIndex {
-		t.Errorf("appliedIndex incorrect after first batch: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex.Load())
+	if batchFSM.fsm.appliedIndex != expectedIndex {
+		t.Errorf("appliedIndex incorrect after first batch: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex)
 	}
 
 	secondBatchSize := 3
@@ -295,8 +295,8 @@ func TestBatchAppliedIndex(t *testing.T) {
 	_ = batchFSM.ApplyBatch(secondLogs)
 
 	expectedIndex = secondLogs[secondBatchSize-1].Index
-	if batchFSM.fsm.appliedIndex.Load() != expectedIndex {
-		t.Errorf("appliedIndex incorrect after second batch: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex.Load())
+	if batchFSM.fsm.appliedIndex != expectedIndex {
+		t.Errorf("appliedIndex incorrect after second batch: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex)
 	}
 
 	oldLogs := make([]*raft.Log, 2)
@@ -314,8 +314,8 @@ func TestBatchAppliedIndex(t *testing.T) {
 
 	_ = batchFSM.ApplyBatch(oldLogs)
 
-	if batchFSM.fsm.appliedIndex.Load() != expectedIndex {
-		t.Errorf("appliedIndex changed after applying old logs: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex.Load())
+	if batchFSM.fsm.appliedIndex != expectedIndex {
+		t.Errorf("appliedIndex changed after applying old logs: expected %d, got %d", expectedIndex, batchFSM.fsm.appliedIndex)
 	}
 
 	var oldVal []byte
@@ -345,8 +345,8 @@ func TestBatchAppliedIndex(t *testing.T) {
 	}
 	defer restartedFSM.Close()
 
-	if restartedFSM.fsm.appliedIndex.Load() != expectedIndex {
-		t.Errorf("appliedIndex not restored correctly after restart: expected %d, got %d", expectedIndex, restartedFSM.fsm.appliedIndex.Load())
+	if restartedFSM.fsm.appliedIndex != expectedIndex {
+		t.Errorf("appliedIndex not restored correctly after restart: expected %d, got %d", expectedIndex, restartedFSM.fsm.appliedIndex)
 	}
 
 	newLogs := make([]*raft.Log, 1)
@@ -366,8 +366,8 @@ func TestBatchAppliedIndex(t *testing.T) {
 
 	_ = restartedFSM.ApplyBatch(newLogs)
 
-	if restartedFSM.fsm.appliedIndex.Load() != expectedIndex+1 {
-		t.Errorf("appliedIndex not updated correctly after restart: expected %d, got %d", expectedIndex+1, restartedFSM.fsm.appliedIndex.Load())
+	if restartedFSM.fsm.appliedIndex != expectedIndex+1 {
+		t.Errorf("appliedIndex not updated correctly after restart: expected %d, got %d", expectedIndex+1, restartedFSM.fsm.appliedIndex)
 	}
 
 	var newVal []byte
