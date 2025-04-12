@@ -24,7 +24,9 @@ import (
 )
 
 var (
-	ErrNotLeader         = errors.New("not leader")
+	ErrNotLeader         = errors.New("not a leader")
+	ErrSerializableRead  = errors.New("serializable read failed")
+	ErrLinearRead        = errors.New("linear read failed")
 	ErrLeaderShipChanged = errors.New("leader changed")
 	ErrNoLeader          = errors.New("no leader found within the cluster for now")
 	ErrLeaderConnChanged = errors.New("leader changed while forward cmd to leader")
@@ -71,6 +73,55 @@ func (n *Node) get(key []byte, at uint64) (Getter, error) {
 	return n.fsm.Get(key, at)
 }
 
+func (n *Node) serializableGet(key []byte, at uint64) (Getter, error) {
+	return n.fsm.Get(key, at)
+}
+
+func (n *Node) linearGet(ctx context.Context, cmd *pb.Command) (Getter, error) {
+	_, oldId, oldTerm, err := n.LeaderInfo()
+	if err != nil {
+		return nil, fmt.Errorf("leadership pre check failed: %w", err)
+	}
+
+	var get Getter
+	var e error
+
+	if !n.isLeaderWithID(oldId) {
+		var resp *pb.CommandResponse
+		resp, e = n.forwardToLeader(ctx, cmd)
+		if e == nil {
+			get = getter{val: resp.Value, ver: resp.Version}
+		}
+	} else {
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, n.opts.WriteTimeout)
+			defer cancel()
+		}
+		timeout, err := durationFromCtx(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("parse timeout failed: %w", err)
+		}
+		bf := n.raft.Barrier(timeout)
+		if err := bf.Error(); err != nil {
+			return nil, fmt.Errorf("error occurred while waiting FSM applying logs aligned with inflight logs err: %w", err)
+		}
+		get, e = n.get(cmd.Kv.Key, cmd.Kv.Version)
+	}
+
+	_, id, term, err := n.LeaderInfo()
+	if err != nil {
+		return nil, fmt.Errorf("leadership post check failed: %w", err)
+	}
+	if oldId != id || oldTerm != term {
+		return nil, ErrLeaderShipChanged
+	}
+	if e != nil {
+		return nil, e
+	}
+	return get, nil
+}
+
 func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -82,55 +133,25 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
 	errCh := make(chan error, 1)
 
 	go func() {
-		if cmd.Rc == pb.Command_RCUnknown || cmd.Rc == pb.Command_Serializable {
-			get, err := n.get(cmd.Kv.Key, cmd.Kv.Version)
+		var get Getter
+		var err error
+		if cmd.Rc == pb.Command_Linearizable {
+			get, err = n.linearGet(ctx, cmd)
 			if err != nil {
-				errCh <- err
-				return
+				err = fmt.Errorf("%w: %w", ErrLinearRead, err)
 			}
-			valCh <- get
-			return
-		}
-
-		_, oldId, oldTerm, err := n.LeaderInfo()
-		if err != nil {
-			errCh <- err
-			return
-		}
-
-		var (
-			ret any
-			e   error
-		)
-
-		if n.isLeaderWithID(oldId) {
-			ret = n.propose(ctx, cmd)
 		} else {
-			var resp *pb.CommandResponse
-			resp, e = n.forwardToLeader(ctx, cmd)
-			if e == nil && resp != nil {
-				ret = getter{val: resp.Value, ver: resp.Version}
+			get, err = n.serializableGet(cmd.Kv.Key, cmd.Kv.Version)
+			if err != nil {
+				err = fmt.Errorf("%w: %w", ErrSerializableRead, err)
 			}
 		}
-
-		_, id, term, err := n.LeaderInfo()
 		if err != nil {
 			errCh <- err
 			return
 		}
-		if oldId != id || oldTerm != term {
-			errCh <- ErrLeaderShipChanged
-			return
-		}
-		if e != nil {
-			errCh <- e
-			return
-		}
-		if err, ok := ret.(error); ok {
-			errCh <- err
-			return
-		}
-		valCh <- ret
+		valCh <- get
+		return
 	}()
 
 	select {
@@ -541,7 +562,7 @@ func (n *Node) Close() error {
 	if n.isLeader.Load() {
 		bf := n.raft.Barrier(30 * time.Second)
 		if err := bf.Error(); err != nil {
-			log.Printf("error occurred while keeping peers applied logs aligned: %v\n", err)
+			log.Printf("closing: error occurred while waiting FSM applying logs aligned with inflight logs: %v\n", err)
 		}
 	}
 	sf := n.raft.Shutdown()

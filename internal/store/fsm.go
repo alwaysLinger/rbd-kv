@@ -30,7 +30,6 @@ var (
 	ErrUpdateConsistentIndex = errors.New("error occurred while update consistent index")
 	ErrKeyNotFound           = errors.New("key not found")
 	ErrReadTxn               = errors.New("error occurred while read txn")
-	ErrLinearReadTxn         = errors.New("error occurred while linear read txn")
 	ErrDeleteTxn             = errors.New("error occurred while delete txn")
 	ErrUpdateTxn             = errors.New("error occurred while update txn")
 	ErrCommitTxn             = errors.New("error occurred while commit txn")
@@ -238,37 +237,6 @@ func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
 	return nil
 }
 
-func (s *FSM) linearRead(key []byte, at, ts uint64) (Getter, error) {
-	if at == 0 {
-		at = math.MaxUint64
-	}
-	var (
-		val []byte
-		ver uint64
-	)
-	err := s.update(at, ts, func(txn *badger.Txn) error {
-		item, err := txn.Get(key)
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				return fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
-			}
-			return fmt.Errorf("%w: key %s at %d: %w", ErrLinearReadTxn, key, at, err)
-		}
-		if val, err = item.ValueCopy(val); err != nil {
-			return fmt.Errorf("%w: key %s at %d: %w", ErrLinearReadTxn, key, at, err)
-		}
-		ver = item.Version()
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return getter{
-		val: val,
-		ver: ver,
-	}, nil
-}
-
 func (s *FSM) put(key, val []byte, ttl time.Duration, ts uint64) any {
 	return s.SetAt(key, val, ttl, ts)
 }
@@ -329,12 +297,6 @@ func (s *FSM) apply(log *raft.Log) any {
 	}
 
 	switch cmd.Op {
-	case pb.Command_Get:
-		if ret, err := s.linearRead(cmd.Kv.Key, cmd.Kv.Version, log.Index); err != nil {
-			return err
-		} else {
-			return ret
-		}
 	case pb.Command_Put:
 		var ttl time.Duration
 		if cmd.Kv.Ttl != nil {
