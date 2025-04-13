@@ -32,7 +32,8 @@ message Command {
     bytes key = 1;
     uint64 version = 2;
     bytes value = 3;
-    google.protobuf.Duration ttl = 4;
+    uint32 meta = 4;
+    google.protobuf.Duration ttl = 5;
   }
 
   OpType op = 1;
@@ -43,7 +44,8 @@ message Command {
 message CommandResponse {
   bytes key = 1;
   bytes value = 2;
-  uint64 version = 3;
+  uint32 meta = 3;
+  uint64 version = 4;
 }
 
 message WatchRequest {
@@ -63,9 +65,10 @@ message Event {
   EventType type = 1;
   bytes key = 2;
   bytes value = 3;
-  uint64 version = 4;
-  uint64 expire_at = 5;
-  string watcher_id = 6;
+  uint32 meta = 4;
+  uint64 version = 5;
+  uint64 expire_at = 6;
+  string watcher_id = 7;
 }
 
 message WatchResponse {

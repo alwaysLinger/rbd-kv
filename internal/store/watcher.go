@@ -67,10 +67,15 @@ func (h *eventDispatcher) add(w *watcher) error {
 				} else {
 					eventType = pb.Event_Put
 				}
+				var meta uint32
+				if ckv.Meta != nil {
+					meta = uint32(ckv.Meta[0])
+				}
 				evt := &pb.Event{
 					Type:      eventType,
 					Key:       ckv.Key,
 					Value:     ckv.Value,
+					Meta:      meta,
 					Version:   ckv.Version,
 					ExpireAt:  ckv.ExpiresAt,
 					WatcherId: w.id,

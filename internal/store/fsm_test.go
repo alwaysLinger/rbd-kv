@@ -281,12 +281,12 @@ func TestFSMTxn(t *testing.T) {
 		value := []byte("txn-value1")
 		at := uint64(100)
 
-		result := fsm.txn.SetAt(key, value, 0, at)
+		result := fsm.txn.SetAt(key, value, 0, 0, at)
 		if err, ok := result.(error); ok && err != nil {
 			t.Fatalf("SetAt failed: %v", err)
 		}
 
-		val, _, err := fsm.txn.ReadAt(key, at)
+		val, _, _, err := fsm.txn.ReadAt(key, at)
 		if err != nil {
 			t.Fatalf("ReadAt after SetAt failed: %v", err)
 		}
@@ -301,12 +301,12 @@ func TestFSMTxn(t *testing.T) {
 		value := []byte("txn-value2")
 		at := uint64(200)
 
-		result := fsm.txn.SetAt(key, value, 0, at)
+		result := fsm.txn.SetAt(key, value, 0, 0, at)
 		if err, ok := result.(error); ok && err != nil {
 			t.Fatalf("SetAt for ReadAt test failed: %v", err)
 		}
 
-		val, _, err := fsm.txn.ReadAt(key, at)
+		val, _, _, err := fsm.txn.ReadAt(key, at)
 		if err != nil {
 			t.Fatalf("ReadAt failed: %v", err)
 		}
@@ -314,7 +314,7 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("ReadAt value mismatch: expected %s, got %s", value, val)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, math.MaxUint64)
+		val, _, _, err = fsm.txn.ReadAt(key, math.MaxUint64)
 		if err != nil {
 			t.Fatalf("ReadAt failed: %v", err)
 		}
@@ -322,12 +322,12 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("ReadAt value mismatch: expected %s, got %s", value, val)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, at-1)
+		val, _, _, err = fsm.txn.ReadAt(key, at-1)
 		if !errors.Is(err, ErrKeyNotFound) {
 			t.Fatalf("ReadAt before at failed: %v", err)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, at+1)
+		val, _, _, err = fsm.txn.ReadAt(key, at+1)
 		if err != nil {
 			t.Fatalf("ReadAt before at failed: %v", err)
 		}
@@ -342,7 +342,7 @@ func TestFSMTxn(t *testing.T) {
 		value := []byte("txn-value3")
 		at := uint64(300)
 
-		result := fsm.txn.SetAt(key, value, 0, at)
+		result := fsm.txn.SetAt(key, value, 0, 0, at)
 		if err, ok := result.(error); ok && err != nil {
 			t.Fatalf("SetAt for Delete test failed: %v", err)
 		}
@@ -352,7 +352,7 @@ func TestFSMTxn(t *testing.T) {
 			t.Fatalf("Delete failed: %v", err)
 		}
 
-		_, _, err = fsm.txn.ReadAt(key, at+2)
+		_, _, _, err = fsm.txn.ReadAt(key, at+2)
 		if !errors.Is(err, ErrKeyNotFound) {
 			t.Error("ReadAt should fail after Delete")
 		}
@@ -366,17 +366,17 @@ func TestFSMTxn(t *testing.T) {
 		at := uint64(400)
 		aat := at + 100
 
-		err := fsm.txn.SetAt(key, value, 0, at)
+		err := fsm.txn.SetAt(key, value, 0, 0, at)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt for Delete test failed: %v", e)
 		}
 
-		err = fsm.txn.SetAt(key, value2, 0, aat)
+		err = fsm.txn.SetAt(key, value2, 0, 0, aat)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt high version failed: %v", e)
 		}
 
-		val, _, err := fsm.txn.ReadAt(key, aat+1)
+		val, _, _, err := fsm.txn.ReadAt(key, aat+1)
 		if err != nil {
 			t.Fatalf("ReadAt high version failed: %v", err)
 		}
@@ -389,12 +389,12 @@ func TestFSMTxn(t *testing.T) {
 			t.Fatalf("Delete high version failed: %v", e)
 		}
 
-		_, _, err = fsm.txn.ReadAt(key, aat+20)
+		_, _, _, err = fsm.txn.ReadAt(key, aat+20)
 		if !errors.Is(err.(error), ErrKeyNotFound) {
 			t.Error("ReadAt should fail after Delete high version")
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, at+1)
+		val, _, _, err = fsm.txn.ReadAt(key, at+1)
 		if err != nil {
 			t.Fatalf("ReadAt low version after high version delete failed: %v", err)
 		}
@@ -409,17 +409,17 @@ func TestFSMTxn(t *testing.T) {
 		value1 := []byte("version-value1")
 		value2 := []byte("version-value2")
 
-		err := fsm.txn.SetAt(key, value1, 0, 600)
+		err := fsm.txn.SetAt(key, value1, 0, 0, 600)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt version 1 failed: %v", e)
 		}
 
-		err = fsm.txn.SetAt(key, value2, 0, 700)
+		err = fsm.txn.SetAt(key, value2, 0, 0, 700)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt version 2 failed: %v", e)
 		}
 
-		val1, _, err := fsm.txn.ReadAt(key, 650)
+		val1, _, _, err := fsm.txn.ReadAt(key, 650)
 		if err != nil {
 			t.Fatalf("ReadAt version 1 failed: %v", err)
 		}
@@ -427,7 +427,7 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("Version 1 value mismatch: expected %s, got %s", value1, val1)
 		}
 
-		val2, _, err := fsm.txn.ReadAt(key, 750)
+		val2, _, _, err := fsm.txn.ReadAt(key, 750)
 		if err != nil {
 			t.Fatalf("ReadAt version 2 failed: %v", err)
 		}
@@ -444,12 +444,12 @@ func TestFSMTxn(t *testing.T) {
 		highTs := uint64(900)
 		lowTs := uint64(800)
 
-		err := fsm.txn.SetAt(key, valueHigh, 0, highTs)
+		err := fsm.txn.SetAt(key, valueHigh, 0, 0, highTs)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt high version failed: %v", e)
 		}
 
-		val, _, err := fsm.txn.ReadAt(key, highTs+1)
+		val, _, _, err := fsm.txn.ReadAt(key, highTs+1)
 		if err != nil {
 			t.Fatalf("ReadAt high version failed: %v", err)
 		}
@@ -457,12 +457,12 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("High version value mismatch: expected %s, got %s", valueHigh, val)
 		}
 
-		err = fsm.txn.SetAt(key, valueLow, 0, lowTs)
+		err = fsm.txn.SetAt(key, valueLow, 0, 0, lowTs)
 		if e, ok := err.(error); ok {
 			t.Fatalf("SetAt low version failed: %v", e)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, lowTs+1)
+		val, _, _, err = fsm.txn.ReadAt(key, lowTs+1)
 		if err != nil {
 			t.Fatalf("ReadAt low version failed: %v", err)
 		}
@@ -470,7 +470,7 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("Low version value mismatch: expected %s, got %s", valueLow, val)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, highTs+1)
+		val, _, _, err = fsm.txn.ReadAt(key, highTs+1)
 		if err != nil {
 			t.Fatalf("ReadAt high version after low version commit failed: %v", err)
 		}
@@ -478,7 +478,7 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("High version value mismatch after low version commit: expected %s, got %s", valueHigh, val)
 		}
 
-		val, _, err = fsm.txn.ReadAt(key, (lowTs+highTs)/2)
+		val, _, _, err = fsm.txn.ReadAt(key, (lowTs+highTs)/2)
 		if err != nil {
 			t.Fatalf("ReadAt middle timestamp failed: %v", err)
 		}

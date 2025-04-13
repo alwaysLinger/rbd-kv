@@ -12,7 +12,7 @@ type BatchFSM struct {
 	fsm *FSM
 }
 
-func (b *BatchFSM) Get(key []byte, at uint64) (Getter, error) {
+func (b *BatchFSM) Get(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
 	return b.fsm.Get(key, at)
 }
 

@@ -23,11 +23,11 @@ type KVService struct {
 func (s *KVService) Execute(ctx context.Context, command *pb.Command) (*pb.CommandResponse, error) {
 	switch command.Op {
 	case pb.Command_Get:
-		val, ver, err := s.store.Get(ctx, command)
+		getter, err := s.store.Get(ctx, command)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.CommandResponse{Value: val, Version: ver}, nil
+		return &pb.CommandResponse{Value: getter.Val(), Meta: uint32(getter.Meta()), Version: getter.Version()}, nil
 	case pb.Command_Put:
 		ver, err := s.store.Put(ctx, command)
 		if err != nil {

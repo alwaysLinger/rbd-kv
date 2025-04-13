@@ -41,7 +41,7 @@ type RaftNode interface {
 }
 
 type Store interface {
-	Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
+	Get(ctx context.Context, cmd *pb.Command) (Getter, error)
 	Put(ctx context.Context, cmd *pb.Command) (uint64, error)
 	Delete(ctx context.Context, cmd *pb.Command) (uint64, error)
 	LeaderInfo() (string, string, uint64, error)
@@ -70,12 +70,44 @@ type storeOptions struct {
 	WriteTimeout time.Duration
 }
 
+type Getter interface {
+	Val() []byte
+	Meta() UserMeta
+	Version() uint64
+}
+
+type getter struct {
+	val  []byte
+	meta UserMeta
+	ver  uint64
+}
+
+func (g getter) Val() []byte {
+	return g.val
+}
+
+func (g getter) Meta() UserMeta {
+	return g.meta
+}
+
+func (g getter) Version() uint64 {
+	return g.ver
+}
+
 func (n *Node) get(key []byte, at uint64) (Getter, error) {
-	return n.fsm.Get(key, at)
+	val, um, ver, err := n.fsm.Get(key, at)
+	if err != nil {
+		return nil, err
+	}
+	return getter{
+		val:  val,
+		meta: um,
+		ver:  ver,
+	}, nil
 }
 
 func (n *Node) serializableGet(key []byte, at uint64) (Getter, error) {
-	return n.fsm.Get(key, at)
+	return n.get(key, at)
 }
 
 func (n *Node) linearGet(ctx context.Context, cmd *pb.Command) (Getter, error) {
@@ -91,7 +123,7 @@ func (n *Node) linearGet(ctx context.Context, cmd *pb.Command) (Getter, error) {
 		var resp *pb.CommandResponse
 		resp, e = n.forwardToLeader(ctx, cmd)
 		if e == nil {
-			get = getter{val: resp.Value, ver: resp.Version}
+			get = getter{val: resp.Value, meta: UserMeta(resp.Meta), ver: resp.Version}
 		}
 	} else {
 		if _, ok := ctx.Deadline(); !ok {
@@ -123,7 +155,7 @@ func (n *Node) linearGet(ctx context.Context, cmd *pb.Command) (Getter, error) {
 	return get, nil
 }
 
-func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error) {
+func (n *Node) Get(ctx context.Context, cmd *pb.Command) (Getter, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, n.opts.ReadTimeout)
@@ -157,18 +189,18 @@ func (n *Node) Get(ctx context.Context, cmd *pb.Command) ([]byte, uint64, error)
 
 	select {
 	case <-ctx.Done():
-		return nil, 0, ctx.Err()
+		return nil, ctx.Err()
 	case val := <-valCh:
 		switch v := val.(type) {
 		case Getter:
-			return v.Val(), v.Version(), nil
+			return v, nil
 		case error:
-			return nil, 0, v
+			return nil, v
 		default:
-			return nil, 0, fmt.Errorf("unexpected get value: %v", v)
+			return nil, fmt.Errorf("unexpected get value: %v", v)
 		}
 	case err := <-errCh:
-		return nil, 0, err
+		return nil, err
 	}
 }
 

@@ -32,9 +32,9 @@ func (l *logOracle) ts(log *raft.Log) uint64 {
 }
 
 type Txn interface {
-	Read(key []byte) ([]byte, uint64, error)
-	ReadAt(key []byte, at uint64) ([]byte, uint64, error)
-	SetAt(key, val []byte, ttl time.Duration, ts uint64) any
+	Read(key []byte) ([]byte, UserMeta, uint64, error)
+	ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error)
+	SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any
 	Delete(key []byte, ts uint64) any
 }
 
@@ -75,9 +75,10 @@ func (ft *fsmTxn) nopUpdate(ts uint64) error {
 	return ft.update(ts, nil)
 }
 
-func (ft *fsmTxn) Read(key []byte) ([]byte, uint64, error) {
+func (ft *fsmTxn) Read(key []byte) ([]byte, UserMeta, uint64, error) {
 	var val []byte
 	var ver uint64
+	var meta byte
 	err := ft.db.View(func(txn *badger.Txn) error {
 		if item, err := txn.Get(key); err != nil {
 			return err
@@ -86,38 +87,45 @@ func (ft *fsmTxn) Read(key []byte) ([]byte, uint64, error) {
 				return err
 			} else {
 				ver = item.Version()
+				meta = item.UserMeta()
 				return nil
 			}
 		}
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return val, ver, nil
+	return val, UserMeta(meta), ver, nil
 }
 
-func (ft *fsmTxn) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
+func (ft *fsmTxn) ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
 	var val []byte
 	txn := ft.db.NewTransactionAt(at, false)
 	defer txn.Discard()
 	item, err := txn.Get(key)
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, 0, fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
+			return nil, 0, 0, fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
 		}
-		return nil, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
+		return nil, 0, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
 	}
 	if val, err = item.ValueCopy(val); err != nil {
-		return nil, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
+		return nil, 0, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
 	}
-	return val, item.Version(), nil
+	return val, UserMeta(item.UserMeta()), item.Version(), nil
 }
 
-func (ft *fsmTxn) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
+func (ft *fsmTxn) SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any {
 	err := ft.update(ts, func(txn *badger.Txn) error {
-		ent := badger.NewEntry(key, val)
+		var expireAt uint64
 		if ttl != 0 {
-			ent.WithTTL(ttl)
+			expireAt = uint64(time.Now().Add(ttl).Unix())
+		}
+		ent := &badger.Entry{
+			Key:       key,
+			Value:     val,
+			UserMeta:  byte(meta),
+			ExpiresAt: expireAt,
 		}
 		return txn.SetEntry(ent)
 	})

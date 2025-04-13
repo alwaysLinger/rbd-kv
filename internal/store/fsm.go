@@ -29,30 +29,14 @@ var (
 	ErrRestore = errors.New("restore failed")
 )
 
+type UserMeta byte
+
 type DB interface {
 	DB() *badger.DB
 }
 
-type Getter interface {
-	Val() []byte
-	Version() uint64
-}
-
-type getter struct {
-	val []byte
-	ver uint64
-}
-
-func (g getter) Val() []byte {
-	return g.val
-}
-
-func (g getter) Version() uint64 {
-	return g.ver
-}
-
 type DBFSM interface {
-	Get(key []byte, at uint64) (Getter, error)
+	Get(key []byte, at uint64) ([]byte, UserMeta, uint64, error)
 	Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint64, err error)
 	Close() error
 
@@ -115,7 +99,7 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 }
 
 func (s *FSM) loadAppliedIndex() error {
-	val, _, err := s.txn.Read(consistentIndexKey)
+	val, _, _, err := s.txn.Read(consistentIndexKey)
 	if err != nil {
 		if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
@@ -149,22 +133,19 @@ func (s *FSM) DB() *badger.DB {
 	return s.db
 }
 
-func (s *FSM) Get(key []byte, at uint64) (Getter, error) {
+func (s *FSM) Get(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
 	if at == 0 {
 		at = math.MaxUint64
 	}
 	return s.get(key, at)
 }
 
-func (s *FSM) get(key []byte, at uint64) (Getter, error) {
-	val, ver, err := s.txn.ReadAt(key, at)
+func (s *FSM) get(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
+	val, meta, ver, err := s.txn.ReadAt(key, at)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
-	return getter{
-		val: val,
-		ver: ver,
-	}, nil
+	return val, meta, ver, nil
 }
 
 func (s *FSM) syncConsistentIndex(ts uint64, txn *badger.Txn) error {
@@ -174,8 +155,8 @@ func (s *FSM) syncConsistentIndex(ts uint64, txn *badger.Txn) error {
 	return nil
 }
 
-func (s *FSM) put(key, val []byte, ttl time.Duration, ts uint64) any {
-	return s.txn.SetAt(key, val, ttl, ts)
+func (s *FSM) put(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any {
+	return s.txn.SetAt(key, val, meta, ttl, ts)
 }
 
 func (s *FSM) del(key []byte, ts uint64) any {
@@ -217,7 +198,7 @@ func (s *FSM) apply(log *raft.Log) any {
 		if cmd.Kv.Ttl != nil {
 			ttl = cmd.Kv.Ttl.AsDuration()
 		}
-		return s.put(cmd.Kv.Key, cmd.Kv.Value, ttl, s.oracle.ts(log))
+		return s.put(cmd.Kv.Key, cmd.Kv.Value, UserMeta(cmd.Kv.Meta), ttl, s.oracle.ts(log))
 	case pb.Command_Delete:
 		return s.del(cmd.Kv.Key, s.oracle.ts(log))
 	default:
