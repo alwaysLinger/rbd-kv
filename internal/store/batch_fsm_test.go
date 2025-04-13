@@ -31,7 +31,7 @@ func newLogIndexStub(index uint64) *logIndexStub {
 func TestBatchApply(t *testing.T) {
 	dir := filepath.Join("/tmp", "batch-apply-test")
 	defer os.RemoveAll(dir)
-	batchFSM, err := OpenBatchFSM(dir, nil, 0)
+	batchFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestBatchApply(t *testing.T) {
 func TestBatchAppliedIndex(t *testing.T) {
 	dir := filepath.Join("/tmp", "batch-applied-index-test")
 	defer os.RemoveAll(dir)
-	batchFSM, err := OpenBatchFSM(dir, nil, 0)
+	batchFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestBatchAppliedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restartedFSM, err := OpenBatchFSM(dir, nil, 0)
+	restartedFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestBatchAppliedIndex(t *testing.T) {
 func BenchmarkApplyBatch(b *testing.B) {
 	dir := filepath.Join("/tmp", "bench-apply-batch")
 	defer os.RemoveAll(dir)
-	batchFSM, err := OpenBatchFSM(dir, nil, 0)
+	batchFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func BenchmarkApplyBatchSizes(b *testing.B) {
 		b.Run(fmt.Sprintf("Size-%d", size), func(b *testing.B) {
 			dir := filepath.Join("/tmp", fmt.Sprintf("bench-batch-%d", size))
 			defer os.RemoveAll(dir)
-			batchFSM, err := OpenBatchFSM(dir, nil, 0)
+			batchFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -476,7 +476,7 @@ func BenchmarkApplyVsBatch(b *testing.B) {
 	b.Run("SingleApply", func(b *testing.B) {
 		dir := filepath.Join("/tmp", "bench-single-apply")
 		defer os.RemoveAll(dir)
-		fsm, err := OpenFSM(dir, nil, 0)
+		fsm, err := OpenFSM(dir, nil, 0, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -509,7 +509,7 @@ func BenchmarkApplyVsBatch(b *testing.B) {
 	b.Run("BatchApply", func(b *testing.B) {
 		dir := filepath.Join("/tmp", "bench-batch-apply")
 		defer os.RemoveAll(dir)
-		batchFSM, err := OpenBatchFSM(dir, nil, 0)
+		batchFSM, err := OpenBatchFSM(dir, nil, 0, nil)
 		if err != nil {
 			b.Fatal(err)
 		}

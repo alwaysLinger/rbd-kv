@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"time"
 
+	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/hashicorp/raft"
@@ -78,9 +78,10 @@ type FSM struct {
 	db           *badger.DB
 	gcTicker     *time.Ticker
 	appliedIndex uint64 // this field will never be accessed concurrently
+	logger       log.Logger
 }
 
-func OpenFSM(dir string, opts *badger.Options, versionKept int) (*FSM, error) {
+func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*FSM, error) {
 	if len(dir) == 0 {
 		dir = os.TempDir()
 	}
@@ -106,6 +107,10 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int) (*FSM, error) {
 		return nil, err
 	}
 	s.db = db
+	if logger == nil {
+		logger = log.NopLogger
+	}
+	s.logger = logger
 
 	if err := s.loadAppliedIndexFromDB(); err != nil {
 		return nil, err
@@ -214,14 +219,14 @@ func (s *FSM) update(ts uint64, f func(txn *badger.Txn) error) error {
 	if f != nil {
 		err := f(txn)
 		if errors.Is(err, badger.ErrTxnTooBig) {
-			log.Printf("ErrTxnTooBig occurred while set a kv pair: %v\n", err)
+			s.logger.Warn("ErrTxnTooBig occurred while set a kv pair", log.Error(err))
 		} else if err != nil {
-			log.Printf("err occurred while update txn: %v\n", err)
+			s.logger.Error("error occurred while update txn", log.Error(err))
 			return err
 		}
 	}
 	if err := txn.CommitAt(ts, nil); err != nil {
-		log.Printf("err occurred while commit txn: %v\n", err)
+		s.logger.Error("error occurred while commit txn", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrCommitTxn, err)
 	}
 	return nil
@@ -316,24 +321,24 @@ func (s *FSM) Apply(log *raft.Log) interface{} {
 }
 
 func (s *FSM) Snapshot() (raft.FSMSnapshot, error) {
-	return &badgerSnapshot{db: s.db, ts: s.appliedIndex}, nil
+	return &badgerSnapshot{db: s.db, ts: s.appliedIndex, logger: s.logger}, nil
 }
 
 func (s *FSM) Restore(snapshot io.ReadCloser) error {
-	log.Println("start restoring")
+	s.logger.Info("start restoring")
 	if err := s.db.DropAll(); err != nil {
-		log.Printf("restore failed: %v\n", err)
+		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
 	if err := s.db.Load(snapshot, restoreGoNum); err != nil {
-		log.Printf("restore failed: %v\n", err)
+		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
 	if err := s.loadAppliedIndexFromDB(); err != nil {
-		log.Printf("restore failed: %v\n", err)
+		s.logger.Error("restore failed", log.Error(err))
 		return err
 	}
-	log.Printf("successfully restored at log index %d\n", s.appliedIndex)
+	s.logger.Info("successfully restored", log.Uint64("log_index", s.appliedIndex))
 	return nil
 }
 

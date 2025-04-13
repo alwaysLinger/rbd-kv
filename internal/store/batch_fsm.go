@@ -4,6 +4,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/hashicorp/raft"
 )
@@ -64,8 +65,8 @@ func (b *BatchFSM) Close() error {
 	return b.fsm.Close()
 }
 
-func OpenBatchFSM(dir string, opts *badger.Options, versionKept int) (*BatchFSM, error) {
-	fsm, err := OpenFSM(dir, opts, versionKept)
+func OpenBatchFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*BatchFSM, error) {
+	fsm, err := OpenFSM(dir, opts, versionKept, logger)
 	if err != nil {
 		return nil, err
 	}
