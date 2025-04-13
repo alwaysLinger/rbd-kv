@@ -26,24 +26,11 @@ const (
 var (
 	consistentIndexKey = []byte("m.!ci")
 
-	ErrUpdateConsistentIndex = errors.New("error occurred while update consistent index")
-	ErrKeyNotFound           = errors.New("key not found")
-	ErrReadTxn               = errors.New("error occurred while read txn")
-	ErrDeleteTxn             = errors.New("error occurred while delete txn")
-	ErrUpdateTxn             = errors.New("error occurred while update txn")
-	ErrCommitTxn             = errors.New("error occurred while commit txn")
-	ErrRestore               = errors.New("restore failed")
+	ErrRestore = errors.New("restore failed")
 )
 
 type DB interface {
 	DB() *badger.DB
-}
-
-type Txn interface {
-	ReadAt(key []byte, at uint64) ([]byte, uint64, error)
-	Write(kvs any) []any
-	SetAt(key, val []byte, ttl time.Duration, ts uint64) any
-	Delete(key []byte, ts uint64) any
 }
 
 type Getter interface {
@@ -70,7 +57,6 @@ type DBFSM interface {
 	Close() error
 
 	DB
-	Txn
 	raft.FSM
 }
 
@@ -79,6 +65,8 @@ type FSM struct {
 	gcTicker     *time.Ticker
 	appliedIndex uint64 // this field will never be accessed concurrently
 	logger       log.Logger
+	oracle       oracle
+	txn          Txn
 }
 
 func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*FSM, error) {
@@ -111,8 +99,14 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 		logger = log.NopLogger
 	}
 	s.logger = logger
+	s.oracle = &logOracle{}
+	s.txn = &fsmTxn{
+		db:       s.db,
+		onUpdate: s.syncConsistentIndex,
+		logger:   s.logger,
+	}
 
-	if err := s.loadAppliedIndexFromDB(); err != nil {
+	if err := s.loadAppliedIndex(); err != nil {
 		return nil, err
 	}
 	go s.runGC()
@@ -120,20 +114,15 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 	return s, nil
 }
 
-func (s *FSM) loadAppliedIndexFromDB() error {
-	txn := s.db.NewTransactionAt(math.MaxUint64, false)
-	defer txn.Discard()
-	if item, err := txn.Get(consistentIndexKey); err != nil {
+func (s *FSM) loadAppliedIndex() error {
+	val, _, err := s.txn.Read(consistentIndexKey)
+	if err != nil {
 		if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
 		return nil
-	} else {
-		_ = item.Value(func(val []byte) error {
-			s.appliedIndex = binary.BigEndian.Uint64(val)
-			return nil
-		})
 	}
+	s.appliedIndex = binary.BigEndian.Uint64(val)
 	return nil
 }
 
@@ -168,7 +157,7 @@ func (s *FSM) Get(key []byte, at uint64) (Getter, error) {
 }
 
 func (s *FSM) get(key []byte, at uint64) (Getter, error) {
-	val, ver, err := s.ReadAt(key, at)
+	val, ver, err := s.txn.ReadAt(key, at)
 	if err != nil {
 		return nil, err
 	}
@@ -178,65 +167,7 @@ func (s *FSM) get(key []byte, at uint64) (Getter, error) {
 	}, nil
 }
 
-func (s *FSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
-	var val []byte
-	txn := s.db.NewTransactionAt(at, false)
-	defer txn.Discard()
-	item, err := txn.Get(key)
-	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, 0, fmt.Errorf("%w: key %s at %d", ErrKeyNotFound, key, at)
-		}
-		return nil, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
-	}
-	if val, err = item.ValueCopy(val); err != nil {
-		return nil, 0, fmt.Errorf("%w: key %s at %d: %w", ErrReadTxn, key, at, err)
-	}
-	return val, item.Version(), nil
-}
-
-func (s *FSM) Write(kvs any) []any {
-	logs, ok := kvs.([]*raft.Log)
-	if !ok {
-		panic("type assertion failed")
-	}
-	ret := make([]any, len(logs))
-	for i, l := range logs {
-		ret[i] = s.apply(l)
-	}
-	return ret
-}
-
-func (s *FSM) update(ts uint64, f func(txn *badger.Txn) error) error {
-	if ts == 0 {
-		panic("no ts provided")
-	}
-	txn := s.db.NewTransactionAt(math.MaxUint64, true)
-	defer txn.Discard()
-	if err := s.syncConsistentIndex(txn, ts); err != nil {
-		return err
-	}
-	if f != nil {
-		err := f(txn)
-		if errors.Is(err, badger.ErrTxnTooBig) {
-			s.logger.Warn("ErrTxnTooBig occurred while set a kv pair", log.Error(err))
-		} else if err != nil {
-			s.logger.Error("error occurred while update txn", log.Error(err))
-			return err
-		}
-	}
-	if err := txn.CommitAt(ts, nil); err != nil {
-		s.logger.Error("error occurred while commit txn", log.Error(err))
-		return fmt.Errorf("%w: %w", ErrCommitTxn, err)
-	}
-	return nil
-}
-
-func (s *FSM) updateNop(ts uint64) error {
-	return s.update(ts, nil)
-}
-
-func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
+func (s *FSM) syncConsistentIndex(ts uint64, txn *badger.Txn) error {
 	if err := txn.SetEntry(badger.NewEntry(consistentIndexKey, uint64ToBytes(ts)).WithDiscard()); err != nil {
 		return fmt.Errorf("%w: %w", ErrUpdateConsistentIndex, err)
 	}
@@ -244,35 +175,11 @@ func (s *FSM) syncConsistentIndex(txn *badger.Txn, ts uint64) error {
 }
 
 func (s *FSM) put(key, val []byte, ttl time.Duration, ts uint64) any {
-	return s.SetAt(key, val, ttl, ts)
-}
-
-func (s *FSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
-	err := s.update(ts, func(txn *badger.Txn) error {
-		ent := badger.NewEntry(key, val)
-		if ttl != 0 {
-			ent.WithTTL(ttl)
-		}
-		return txn.SetEntry(ent)
-	})
-	if err != nil {
-		return fmt.Errorf("%w:key %s value %s at %d: %w", ErrUpdateTxn, key, val, ts, err)
-	}
-	return ts
+	return s.txn.SetAt(key, val, ttl, ts)
 }
 
 func (s *FSM) del(key []byte, ts uint64) any {
-	return s.Delete(key, ts)
-}
-
-func (s *FSM) Delete(key []byte, ts uint64) any {
-	err := s.update(ts, func(txn *badger.Txn) error {
-		return txn.Delete(key)
-	})
-	if err != nil {
-		return fmt.Errorf("%w:key %s at %d: %w", ErrDeleteTxn, key, ts, err)
-	}
-	return ts
+	return s.txn.Delete(key, ts)
 }
 
 func uint64ToBytes(u uint64) []byte {
@@ -292,7 +199,9 @@ func (s *FSM) apply(log *raft.Log) any {
 	}()
 
 	if log.Type != raft.LogCommand {
-		_ = s.updateNop(log.Index)
+		if txn, ok := s.txn.(*fsmTxn); ok {
+			_ = txn.nopUpdate(s.oracle.ts(log))
+		}
 		return nil
 	}
 
@@ -308,9 +217,9 @@ func (s *FSM) apply(log *raft.Log) any {
 		if cmd.Kv.Ttl != nil {
 			ttl = cmd.Kv.Ttl.AsDuration()
 		}
-		return s.put(cmd.Kv.Key, cmd.Kv.Value, ttl, log.Index)
+		return s.put(cmd.Kv.Key, cmd.Kv.Value, ttl, s.oracle.ts(log))
 	case pb.Command_Delete:
-		return s.del(cmd.Kv.Key, log.Index)
+		return s.del(cmd.Kv.Key, s.oracle.ts(log))
 	default:
 		panic("not excepted command operation")
 	}
@@ -334,7 +243,7 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
-	if err := s.loadAppliedIndexFromDB(); err != nil {
+	if err := s.loadAppliedIndex(); err != nil {
 		s.logger.Error("restore failed", log.Error(err))
 		return err
 	}

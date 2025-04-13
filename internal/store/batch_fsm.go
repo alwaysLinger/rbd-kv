@@ -2,7 +2,6 @@ package store
 
 import (
 	"io"
-	"time"
 
 	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/dgraph-io/badger/v4"
@@ -17,24 +16,12 @@ func (b *BatchFSM) Get(key []byte, at uint64) (Getter, error) {
 	return b.fsm.Get(key, at)
 }
 
-func (b *BatchFSM) ReadAt(key []byte, at uint64) ([]byte, uint64, error) {
-	return b.fsm.ReadAt(key, at)
-}
-
-func (b *BatchFSM) Write(kvs any) []any {
-	return b.fsm.Write(kvs)
-}
-
-func (b *BatchFSM) SetAt(key, val []byte, ttl time.Duration, ts uint64) any {
-	return b.fsm.SetAt(key, val, ttl, ts)
-}
-
-func (b *BatchFSM) Delete(key []byte, ts uint64) any {
-	return b.fsm.Delete(key, ts)
-}
-
 func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
-	return b.fsm.Write(logs)
+	ret := make([]any, len(logs))
+	for i, l := range logs {
+		ret[i] = b.fsm.apply(l)
+	}
+	return ret
 }
 
 func (b *BatchFSM) ApplyBatch(logs []*raft.Log) []interface{} {
