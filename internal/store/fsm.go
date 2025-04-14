@@ -99,9 +99,9 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 }
 
 func (s *FSM) loadAppliedIndex() error {
-	val, _, _, err := s.txn.Read(consistentIndexKey)
+	val, _, _, err := s.txn.ReadAt(consistentIndexKey, math.MaxUint64)
 	if err != nil {
-		if !errors.Is(err, badger.ErrKeyNotFound) {
+		if !errors.Is(err, ErrKeyNotFound) {
 			return err
 		}
 		return nil
@@ -160,7 +160,7 @@ func (s *FSM) put(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) 
 }
 
 func (s *FSM) del(key []byte, ts uint64) any {
-	return s.txn.Delete(key, ts)
+	return s.txn.DeleteAt(key, ts)
 }
 
 func uint64ToBytes(u uint64) []byte {

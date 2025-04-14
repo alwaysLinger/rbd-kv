@@ -32,10 +32,9 @@ func (l *logOracle) ts(log *raft.Log) uint64 {
 }
 
 type Txn interface {
-	Read(key []byte) ([]byte, UserMeta, uint64, error)
 	ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error)
 	SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any
-	Delete(key []byte, ts uint64) any
+	DeleteAt(key []byte, ts uint64) any
 }
 
 type fsmTxn struct {
@@ -75,29 +74,6 @@ func (ft *fsmTxn) nopUpdate(ts uint64) error {
 	return ft.update(ts, nil)
 }
 
-func (ft *fsmTxn) Read(key []byte) ([]byte, UserMeta, uint64, error) {
-	var val []byte
-	var ver uint64
-	var meta byte
-	err := ft.db.View(func(txn *badger.Txn) error {
-		if item, err := txn.Get(key); err != nil {
-			return err
-		} else {
-			if val, err = item.ValueCopy(val); err != nil {
-				return err
-			} else {
-				ver = item.Version()
-				meta = item.UserMeta()
-				return nil
-			}
-		}
-	})
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	return val, UserMeta(meta), ver, nil
-}
-
 func (ft *fsmTxn) ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
 	var val []byte
 	txn := ft.db.NewTransactionAt(at, false)
@@ -135,7 +111,7 @@ func (ft *fsmTxn) SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts ui
 	return ts
 }
 
-func (ft *fsmTxn) Delete(key []byte, ts uint64) any {
+func (ft *fsmTxn) DeleteAt(key []byte, ts uint64) any {
 	err := ft.update(ts, func(txn *badger.Txn) error {
 		return txn.Delete(key)
 	})

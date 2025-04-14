@@ -336,7 +336,7 @@ func TestFSMTxn(t *testing.T) {
 		}
 	})
 
-	t.Run("Delete", func(t *testing.T) {
+	t.Run("DeleteAt", func(t *testing.T) {
 		t.Parallel()
 		key := []byte("txn-key3")
 		value := []byte("txn-value3")
@@ -344,17 +344,17 @@ func TestFSMTxn(t *testing.T) {
 
 		result := fsm.txn.SetAt(key, value, 0, 0, at)
 		if err, ok := result.(error); ok && err != nil {
-			t.Fatalf("SetAt for Delete test failed: %v", err)
+			t.Fatalf("SetAt for DeleteAt test failed: %v", err)
 		}
 
-		result = fsm.txn.Delete(key, at+1)
+		result = fsm.txn.DeleteAt(key, at+1)
 		if err, ok := result.(error); ok && err != nil {
-			t.Fatalf("Delete failed: %v", err)
+			t.Fatalf("DeleteAt failed: %v", err)
 		}
 
 		_, _, _, err = fsm.txn.ReadAt(key, at+2)
 		if !errors.Is(err, ErrKeyNotFound) {
-			t.Error("ReadAt should fail after Delete")
+			t.Error("ReadAt should fail after DeleteAt")
 		}
 	})
 
@@ -368,7 +368,7 @@ func TestFSMTxn(t *testing.T) {
 
 		err := fsm.txn.SetAt(key, value, 0, 0, at)
 		if e, ok := err.(error); ok {
-			t.Fatalf("SetAt for Delete test failed: %v", e)
+			t.Fatalf("SetAt for DeleteAt test failed: %v", e)
 		}
 
 		err = fsm.txn.SetAt(key, value2, 0, 0, aat)
@@ -384,14 +384,14 @@ func TestFSMTxn(t *testing.T) {
 			t.Errorf("High version value mismatch: expected %s, got %s", value2, val)
 		}
 
-		err = fsm.txn.Delete(key, aat+10)
+		err = fsm.txn.DeleteAt(key, aat+10)
 		if e, ok := err.(error); ok {
-			t.Fatalf("Delete high version failed: %v", e)
+			t.Fatalf("DeleteAt high version failed: %v", e)
 		}
 
 		_, _, _, err = fsm.txn.ReadAt(key, aat+20)
 		if !errors.Is(err.(error), ErrKeyNotFound) {
-			t.Error("ReadAt should fail after Delete high version")
+			t.Error("ReadAt should fail after DeleteAt high version")
 		}
 
 		val, _, _, err = fsm.txn.ReadAt(key, at+1)
