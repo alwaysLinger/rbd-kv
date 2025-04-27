@@ -35,6 +35,7 @@ type Txn interface {
 	ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error)
 	SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any
 	DeleteAt(key []byte, ts uint64) any
+	Iterator(prefix []byte, f func(item any) error, reverse bool, at uint64) Iterator
 }
 
 type fsmTxn struct {
@@ -119,4 +120,8 @@ func (ft *fsmTxn) DeleteAt(key []byte, ts uint64) any {
 		return fmt.Errorf("%w:key %s at %d: %w", ErrDeleteTxn, key, ts, err)
 	}
 	return ts
+}
+
+func (ft *fsmTxn) Iterator(prefix []byte, f func(item any) error, reverse bool, at uint64) Iterator {
+	return newBadgerDBIterator(ft.db, prefix, f, reverse, at)
 }

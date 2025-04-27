@@ -239,16 +239,14 @@ func (s *FSM) Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint6
 	} else {
 		lsmSize, vlogSize = s.db.EstimateSize(nil)
 	}
+
 	if withKeyCount {
-		err = s.db.View(func(txn *badger.Txn) error {
-			it := txn.NewIterator(badger.IteratorOptions{})
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				keyCount++
-			}
+		var prefix []byte
+		it := s.txn.Iterator(prefix, func(item any) error {
+			keyCount++
 			return nil
-		})
-		if err != nil {
+		}, false, 0)
+		if err = it.Iterate(); err != nil {
 			return 0, 0, 0, err
 		}
 		return
