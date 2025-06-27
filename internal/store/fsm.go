@@ -19,8 +19,6 @@ import (
 const (
 	backUpGoNum  = 64
 	restoreGoNum = 64
-
-	maxVersionKept = 1000
 )
 
 var (
@@ -68,9 +66,9 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 	}
 
 	if versionKept == 0 {
-		versionKept = 50
+		versionKept = math.MaxInt
 	}
-	*opts = (*opts).WithNumVersionsToKeep(min(versionKept, maxVersionKept))
+	*opts = (*opts).WithNumVersionsToKeep(versionKept)
 
 	s := new(FSM)
 
@@ -242,7 +240,7 @@ func (s *FSM) Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint6
 
 	if withKeyCount {
 		var prefix []byte
-		it := s.txn.Iterator(prefix, func(item any) error {
+		it := s.txn.Iterator(prefix, func(_ *badger.Item) error {
 			keyCount++
 			return nil
 		}, false, 0)

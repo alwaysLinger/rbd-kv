@@ -13,7 +13,7 @@ type Iterator interface {
 type badgerDBIterator struct {
 	db      *badger.DB
 	prefix  []byte
-	f       func(item any) error
+	f       func(item *badger.Item) error
 	reverse bool
 	at      uint64
 	opts    *badger.IteratorOptions
@@ -42,7 +42,7 @@ func (bit *badgerDBIterator) Iterate() error {
 	return nil
 }
 
-func newBadgerDBIterator(db *badger.DB, prefix []byte, f func(item any) error, reverse bool, at uint64) *badgerDBIterator {
+func newBadgerDBIterator(db *badger.DB, prefix []byte, f func(item *badger.Item) error, reverse bool, at uint64) *badgerDBIterator {
 	return &badgerDBIterator{
 		db:      db,
 		prefix:  prefix,
