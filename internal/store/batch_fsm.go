@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/alwaysLinger/rbkv/internal/log"
@@ -10,6 +11,7 @@ import (
 
 type BatchFSM struct {
 	fsm *FSM
+	wb  *writeBatch
 }
 
 func (b *BatchFSM) Get(key []byte, at uint64) ([]byte, UserMeta, uint64, error) {
@@ -17,18 +19,30 @@ func (b *BatchFSM) Get(key []byte, at uint64) ([]byte, UserMeta, uint64, error) 
 }
 
 func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
-	ret := make([]any, len(logs))
-	for i, l := range logs {
-		ret[i] = b.fsm.apply(l)
+	last := logs[len(logs)-1]
+	if last.Index <= b.fsm.appliedIndex {
+		return make([]any, len(logs))
 	}
-	return ret
+
+	defer func() {
+		if b.fsm.appliedIndex < last.Index {
+			b.fsm.appliedIndex = last.Index
+		}
+	}()
+
+	items := b.wb.newBatch(logs, b.fsm.appliedIndex)
+	wb := b.fsm.txn.WriteBatch()
+	return wb.Flush(items)
 }
 
-func (b *BatchFSM) ApplyBatch(logs []*raft.Log) []interface{} {
+func (b *BatchFSM) ApplyBatch(logs []*raft.Log) []any {
+	if len(logs) == 1 {
+		return []any{b.Apply(logs[0])}
+	}
 	return b.applyBatch(logs)
 }
 
-func (b *BatchFSM) Apply(l *raft.Log) interface{} {
+func (b *BatchFSM) Apply(l *raft.Log) any {
 	return b.fsm.Apply(l)
 }
 
@@ -57,5 +71,19 @@ func OpenBatchFSM(dir string, opts *badger.Options, versionKept int, logger log.
 	if err != nil {
 		return nil, err
 	}
-	return &BatchFSM{fsm: fsm}, nil
+
+	b := &BatchFSM{fsm: fsm}
+	batcher := newWriteBatch(fsm.DB(), fsm.oracle, b.syncConsistentIndex)
+	if txn, ok := fsm.txn.(*fsmTxn); ok {
+		txn.batcher = batcher
+	}
+	b.wb = batcher
+	return b, nil
+}
+
+func (b *BatchFSM) syncConsistentIndex(ts uint64, wb *badger.WriteBatch) error {
+	if err := wb.SetEntryAt(badger.NewEntry(consistentIndexKey, uint64ToBytes(ts)).WithDiscard(), ts); err != nil {
+		return fmt.Errorf("%w: %w", ErrUpdateConsistentIndex, err)
+	}
+	return nil
 }

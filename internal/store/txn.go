@@ -36,11 +36,13 @@ type Txn interface {
 	SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any
 	DeleteAt(key []byte, ts uint64) any
 	Iterator(prefix []byte, f func(item *badger.Item) error, reverse bool, at uint64) Iterator
+	WriteBatch() Batcher
 }
 
 type fsmTxn struct {
 	db       *badger.DB
 	onUpdate func(ts uint64, txn *badger.Txn) error
+	batcher  Batcher
 	logger   log.Logger
 }
 
@@ -124,4 +126,8 @@ func (ft *fsmTxn) DeleteAt(key []byte, ts uint64) any {
 
 func (ft *fsmTxn) Iterator(prefix []byte, f func(item *badger.Item) error, reverse bool, at uint64) Iterator {
 	return newBadgerDBIterator(ft.db, prefix, f, reverse, at)
+}
+
+func (ft *fsmTxn) WriteBatch() Batcher {
+	return ft.batcher
 }

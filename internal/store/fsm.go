@@ -204,7 +204,7 @@ func (s *FSM) apply(log *raft.Log) any {
 	}
 }
 
-func (s *FSM) Apply(log *raft.Log) interface{} {
+func (s *FSM) Apply(log *raft.Log) any {
 	return s.apply(log)
 }
 
