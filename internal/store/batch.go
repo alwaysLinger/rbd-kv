@@ -142,7 +142,7 @@ func (wb *writeBatch) newBatch(logs []*raft.Log, appliedIndex uint64) *batch {
 			if log.Type == raft.LogCommand {
 				cmd := &pb.Command{}
 				if err := proto.Unmarshal(log.Data, cmd); err != nil {
-					item.err = fmt.Errorf("%w: %s: %w", ErrBatchUnmarshal, log.Data, err)
+					panic(fmt.Errorf("%w: %s: %w", ErrBatchUnmarshal, log.Data, err))
 				} else {
 					item.op = cmd.Op
 					item.key = cmd.Kv.Key

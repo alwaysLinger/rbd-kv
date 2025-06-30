@@ -24,7 +24,8 @@ const (
 var (
 	consistentIndexKey = []byte("m.!ci")
 
-	ErrRestore = errors.New("restore failed")
+	ErrRestore        = errors.New("restore failed")
+	ErrApplyUnmarshal = errors.New("failed to unmarshal raft log data")
 )
 
 type UserMeta byte
@@ -187,7 +188,7 @@ func (s *FSM) apply(log *raft.Log) any {
 	cmd := &pb.Command{}
 	err := proto.Unmarshal(log.Data, cmd)
 	if err != nil {
-		return err
+		panic(fmt.Errorf("%w: %s: %w", ErrApplyUnmarshal, log.Data, err))
 	}
 
 	switch cmd.Op {
