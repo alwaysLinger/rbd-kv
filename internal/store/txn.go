@@ -40,7 +40,7 @@ type Txn[T any] interface {
 
 type BatchTxn[T, B any] interface {
 	Txn[T]
-	WriteBatch(B) Batcher[B]
+	WriteBatch() Batcher[B]
 }
 
 type fsmTxn struct {
@@ -136,6 +136,6 @@ type batchFsmTxn[T any] struct {
 	batcher Batcher[T]
 }
 
-func (b *batchFsmTxn[T]) WriteBatch(T) Batcher[T] {
+func (b *batchFsmTxn[T]) WriteBatch() Batcher[T] {
 	return b.batcher
 }

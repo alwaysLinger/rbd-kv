@@ -32,7 +32,7 @@ func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
 	}()
 
 	items := b.wb.newBatch(logs, b.fsm.appliedIndex)
-	wb := b.txn.WriteBatch(items)
+	wb := b.txn.WriteBatch()
 	return wb.Flush(items)
 }
 
