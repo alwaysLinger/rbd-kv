@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/alwaysLinger/rbkv/pb"
@@ -20,14 +19,14 @@ var (
 	ErrBatchFlush     = errors.New("failed to flush a batch")
 )
 
-type Batcher interface {
-	Flush(*batch) []any
+type Batcher[T any] interface {
+	Flush(T) []any
 }
 
 type writeBatch struct {
 	db         *badger.DB
 	oracle     oracle
-	pool       *sync.Pool
+	pool       *Pool[*batchItem]
 	onEachItem func(ts uint64, wb *badger.WriteBatch) error
 }
 
@@ -91,17 +90,15 @@ func newWriteBatch(db *badger.DB, oracle oracle, onUpdate func(ts uint64, wb *ba
 	return &writeBatch{
 		db:     db,
 		oracle: oracle,
-		pool: &sync.Pool{
-			New: func() any {
-				return &batchItem{}
-			},
-		},
+		pool: NewPool[*batchItem](func() *batchItem {
+			return &batchItem{}
+		}),
 		onEachItem: onUpdate,
 	}
 }
 
 func (wb *writeBatch) getItem() *batchItem {
-	return wb.pool.Get().(*batchItem)
+	return wb.pool.Get()
 }
 
 type batchItem struct {
@@ -127,7 +124,7 @@ type batch struct {
 	items []*batchItem
 }
 
-func (b *batch) release(pool *sync.Pool) {
+func (b *batch) release(pool *Pool[*batchItem]) {
 	for _, item := range b.items {
 		item.reset()
 		pool.Put(item)

@@ -31,18 +31,21 @@ func (l *logOracle) ts(log *raft.Log) uint64 {
 	return log.Index
 }
 
-type Txn interface {
+type Txn[T any] interface {
 	ReadAt(key []byte, at uint64) ([]byte, UserMeta, uint64, error)
 	SetAt(key, val []byte, meta UserMeta, ttl time.Duration, ts uint64) any
 	DeleteAt(key []byte, ts uint64) any
-	Iterator(prefix []byte, f func(item *badger.Item) error, reverse bool, at uint64) Iterator
-	WriteBatch() Batcher
+	Iterator(prefix []byte, f func(item T) error, reverse bool, at uint64) Iterator
+}
+
+type BatchTxn[T, B any] interface {
+	Txn[T]
+	WriteBatch(B) Batcher[B]
 }
 
 type fsmTxn struct {
 	db       *badger.DB
 	onUpdate func(ts uint64, txn *badger.Txn) error
-	batcher  Batcher
 	logger   log.Logger
 }
 
@@ -128,6 +131,11 @@ func (ft *fsmTxn) Iterator(prefix []byte, f func(item *badger.Item) error, rever
 	return newBadgerDBIterator(ft.db, prefix, f, reverse, at)
 }
 
-func (ft *fsmTxn) WriteBatch() Batcher {
-	return ft.batcher
+type batchFsmTxn[T any] struct {
+	Txn[*badger.Item]
+	batcher Batcher[T]
+}
+
+func (b *batchFsmTxn[T]) WriteBatch(T) Batcher[T] {
+	return b.batcher
 }

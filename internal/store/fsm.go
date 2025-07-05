@@ -49,7 +49,7 @@ type FSM struct {
 	appliedIndex uint64 // this field will never be accessed concurrently
 	logger       log.Logger
 	oracle       oracle
-	txn          Txn
+	txn          Txn[*badger.Item]
 }
 
 func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*FSM, error) {

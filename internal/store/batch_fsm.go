@@ -11,6 +11,7 @@ import (
 
 type BatchFSM struct {
 	fsm *FSM
+	txn BatchTxn[*badger.Item, *batch]
 	wb  *writeBatch
 }
 
@@ -31,7 +32,7 @@ func (b *BatchFSM) applyBatch(logs []*raft.Log) []any {
 	}()
 
 	items := b.wb.newBatch(logs, b.fsm.appliedIndex)
-	wb := b.fsm.txn.WriteBatch()
+	wb := b.txn.WriteBatch(items)
 	return wb.Flush(items)
 }
 
@@ -73,10 +74,8 @@ func OpenBatchFSM(dir string, opts *badger.Options, versionKept int, logger log.
 	}
 
 	b := &BatchFSM{fsm: fsm}
-	batcher := newWriteBatch(fsm.DB(), fsm.oracle, b.syncConsistentIndex)
-	if txn, ok := fsm.txn.(*fsmTxn); ok {
-		txn.batcher = batcher
-	}
+	batcher := newWriteBatch(b.DB(), fsm.oracle, b.syncConsistentIndex)
+	b.txn = &batchFsmTxn[*batch]{Txn: fsm.txn, batcher: batcher}
 	b.wb = batcher
 	return b, nil
 }
