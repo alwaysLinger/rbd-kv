@@ -118,6 +118,7 @@ func (bi *batchItem) reset() {
 	bi.meta = 0
 	bi.ttl = 0
 	bi.ts = 0
+	bi.err = nil
 }
 
 type batch struct {
