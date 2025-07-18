@@ -23,7 +23,7 @@ implementation.
 2. Serializable and linearizable read
 3. Support MVCC
 4. Watch mechanism for key events
-5. SSD design friendly, FSM storage size unlimited, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
+5. SSD design friendly, FSM storage size unlimited with multi-raft, thanks to [BadgerDB](https://github.com/dgraph-io/badger)
 6. Use grpc as client interface
 7. Support [haschicorp/raft BatchingFSM](https://github.com/hashicorp/raft), with this feature enabled, you will get
    higher throughput but may increase log replication latency, potentially losing more raft logs that haven't been
@@ -65,7 +65,8 @@ implementation.
 
 ## TODO
 
-1. Support multi keys transaction
-2. Smarter client
-3. Cmdline tool
+1. Support Multi-Raft for better extensibility
+2. Support multi keys transaction
+3. Smarter client
+4. Cmdline tool
 
