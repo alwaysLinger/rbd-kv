@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/alwaysLinger/rbkv/internal/log"
@@ -222,7 +223,12 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
-	if err := s.db.Load(snapshot, restoreGoNum); err != nil {
+	r := &yieldReader{
+		snapshot:   snapshot,
+		throughput: 300,
+		it:         0,
+	}
+	if err := s.db.Load(r, restoreGoNum); err != nil {
 		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
@@ -258,4 +264,18 @@ func (s *FSM) Stats(exact, withKeyCount bool) (lsmSize, vlogSize, keyCount uint6
 		return
 	}
 	return
+}
+
+type yieldReader struct {
+	snapshot   io.Reader
+	throughput uint64
+	it         uint64
+}
+
+func (yr *yieldReader) Read(p []byte) (n int, err error) {
+	yr.it++
+	if yr.it%yr.throughput == 0 {
+		runtime.Gosched()
+	}
+	return yr.snapshot.Read(p)
 }
