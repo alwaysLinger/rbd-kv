@@ -12,13 +12,16 @@ import (
 	"github.com/alwaysLinger/rbkv/internal/log"
 	"github.com/alwaysLinger/rbkv/pb"
 	"github.com/dgraph-io/badger/v4"
+	copts "github.com/dgraph-io/badger/v4/options"
 	"github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	backUpGoNum  = 64
-	restoreGoNum = 64
+	backUpGoNum  = 128
+	restoreGoNum = 128
+
+	maxKeptVersion = 1000
 )
 
 var (
@@ -62,16 +65,14 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 			WithDetectConflicts(false).
 			WithBlockCacheSize(512 << 20).
 			WithValueThreshold(4 << 10).
+			WithCompression(copts.ZSTD).
 			WithNumGoroutines(backUpGoNum).
 			WithMetricsEnabled(false).
 			WithLoggingLevel(badger.WARNING)
 		opts = &options
 	}
 
-	if versionKept == 0 {
-		versionKept = math.MaxInt
-	}
-	*opts = (*opts).WithNumVersionsToKeep(versionKept)
+	*opts = (*opts).WithNumVersionsToKeep(min(maxKeptVersion, versionKept))
 
 	s := new(FSM)
 
@@ -112,7 +113,7 @@ func (s *FSM) loadAppliedIndex() error {
 }
 
 func (s *FSM) runGC() {
-	s.gcTicker = time.NewTicker(time.Hour)
+	s.gcTicker = time.NewTicker(time.Minute * 10)
 	for range s.gcTicker.C {
 	again:
 		err := s.db.RunValueLogGC(0.5)
@@ -227,6 +228,10 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 	}
 	if err := s.loadAppliedIndex(); err != nil {
 		s.logger.Error("restore failed", log.Error(err))
+		return err
+	}
+	if err := s.db.Flatten(restoreGoNum); err != nil {
+		s.logger.Error("flatter failed after restore", log.Error(err))
 		return err
 	}
 	s.logger.Info("successfully restored", log.Uint64("log_index", s.appliedIndex))
