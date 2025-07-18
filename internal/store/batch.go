@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"time"
 
@@ -24,6 +25,7 @@ type Batcher[T any] interface {
 }
 
 type writeBatch struct {
+	throughput int
 	db         *badger.DB
 	oracle     oracle
 	pool       *Pool[*batchItem]
@@ -88,8 +90,9 @@ func (wb *writeBatch) Flush(b *batch) []any {
 
 func newWriteBatch(db *badger.DB, oracle oracle, onUpdate func(ts uint64, wb *badger.WriteBatch) error) *writeBatch {
 	return &writeBatch{
-		db:     db,
-		oracle: oracle,
+		throughput: 300,
+		db:         db,
+		oracle:     oracle,
 		pool: NewPool[*batchItem](func() *batchItem {
 			return &batchItem{}
 		}),
@@ -134,6 +137,7 @@ func (b *batch) release(pool *Pool[*batchItem]) {
 
 func (wb *writeBatch) newBatch(logs []*raft.Log, appliedIndex uint64) *batch {
 	items := make([]*batchItem, 0, len(logs))
+	i := 0
 	for _, log := range logs {
 		item := wb.getItem()
 		if log.Index > appliedIndex {
@@ -154,6 +158,10 @@ func (wb *writeBatch) newBatch(logs []*raft.Log, appliedIndex uint64) *batch {
 			}
 		}
 		items = append(items, item)
+		i++
+		if i > wb.throughput {
+			runtime.Gosched()
+		}
 	}
 
 	return &batch{items: items}

@@ -630,7 +630,7 @@ func NewNode(id string, fsm DBFSM, logger log.Logger) *Node {
 	}
 	go func() {
 		for ob := range obCh {
-			if e, ok := ob.Data.(raft.LeaderObservation); ok {
+			if e, ok := ob.Data.(raft.LeaderObservation); ok && len(e.LeaderID) != 0 {
 				if err := n.setKVConn(string(e.LeaderID)); err != nil {
 					n.logger.Error("failed to set KV connection to leader",
 						log.String("leader_id", string(e.LeaderID)),

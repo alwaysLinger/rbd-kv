@@ -58,8 +58,10 @@ func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logge
 	}
 
 	if opts == nil {
-		options := badger.LSMOnlyOptions(dir).
+		options := badger.DefaultOptions(dir).
 			WithDetectConflicts(false).
+			WithBlockCacheSize(512 << 20).
+			WithValueThreshold(4 << 10).
 			WithNumGoroutines(backUpGoNum).
 			WithMetricsEnabled(false).
 			WithLoggingLevel(badger.WARNING)
