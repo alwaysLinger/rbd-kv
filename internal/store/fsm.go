@@ -18,12 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const (
-	backUpGoNum  = 128
-	restoreGoNum = 128
-
-	maxKeptVersion = 1000
-)
+const maxKeptVersion = math.MaxInt
 
 var (
 	consistentIndexKey = []byte("m.!ci")
@@ -47,6 +42,20 @@ type DBFSM interface {
 	raft.FSM
 }
 
+type Option func(*FSM)
+
+func WithBackupGoNum(n int) Option {
+	return func(fsm *FSM) {
+		fsm.backupGoNum = n
+	}
+}
+
+func WithRestoreGoNum(n int) Option {
+	return func(fsm *FSM) {
+		fsm.restoreGoNum = n
+	}
+}
+
 type FSM struct {
 	db           *badger.DB
 	gcTicker     *time.Ticker
@@ -54,30 +63,40 @@ type FSM struct {
 	logger       log.Logger
 	oracle       oracle
 	txn          Txn[*badger.Item]
+	backupGoNum  int
+	restoreGoNum int
 }
 
-func OpenFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*FSM, error) {
+func OpenFSM(dir string, bopts *badger.Options, versionKept int, logger log.Logger, opts ...Option) (*FSM, error) {
 	if len(dir) == 0 {
 		dir = os.TempDir()
 	}
 
-	if opts == nil {
+	s := new(FSM)
+	s.backupGoNum = 8
+	s.restoreGoNum = 8
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	if bopts == nil {
 		options := badger.DefaultOptions(dir).
 			WithDetectConflicts(false).
 			WithBlockCacheSize(512 << 20).
 			WithValueThreshold(4 << 10).
 			WithCompression(copts.ZSTD).
-			WithNumGoroutines(backUpGoNum).
+			WithNumGoroutines(s.backupGoNum).
 			WithMetricsEnabled(false).
 			WithLoggingLevel(badger.WARNING)
-		opts = &options
+		bopts = &options
 	}
 
-	*opts = (*opts).WithNumVersionsToKeep(min(maxKeptVersion, versionKept))
+	if versionKept == 0 {
+		versionKept = maxKeptVersion
+	}
+	*bopts = (*bopts).WithNumVersionsToKeep(versionKept)
 
-	s := new(FSM)
-
-	db, err := badger.OpenManaged(*opts)
+	db, err := badger.OpenManaged(*bopts)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +133,7 @@ func (s *FSM) loadAppliedIndex() error {
 }
 
 func (s *FSM) runGC() {
-	s.gcTicker = time.NewTicker(time.Minute * 10)
+	s.gcTicker = time.NewTicker(time.Minute * 30)
 	for range s.gcTicker.C {
 	again:
 		err := s.db.RunValueLogGC(0.5)
@@ -228,16 +247,12 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 		throughput: 300,
 		it:         0,
 	}
-	if err := s.db.Load(r, restoreGoNum); err != nil {
+	if err := s.db.Load(r, s.restoreGoNum); err != nil {
 		s.logger.Error("restore failed", log.Error(err))
 		return fmt.Errorf("%w: %w", ErrRestore, err)
 	}
 	if err := s.loadAppliedIndex(); err != nil {
 		s.logger.Error("restore failed", log.Error(err))
-		return err
-	}
-	if err := s.db.Flatten(restoreGoNum); err != nil {
-		s.logger.Error("flatter failed after restore", log.Error(err))
 		return err
 	}
 	s.logger.Info("successfully restored", log.Uint64("log_index", s.appliedIndex))

@@ -12,13 +12,15 @@ import (
 )
 
 var (
-	grpcAddr    string
-	raftAddr    string
-	joinAddr    string
-	logDir      string
-	kvDir       string
-	batchSize   uint64
-	versionKept int
+	grpcAddr     string
+	raftAddr     string
+	joinAddr     string
+	logDir       string
+	kvDir        string
+	batchSize    uint64
+	versionKept  int
+	backupGoNum  int
+	restoreGoNum int
 )
 
 func init() {
@@ -29,6 +31,8 @@ func init() {
 	flag.StringVar(&kvDir, "kv-dir", "", "Set kv log storage dir")
 	flag.Uint64Var(&batchSize, "batch-size", 0, "Size of apply channel batch, values <= 0 disable batching")
 	flag.IntVar(&versionKept, "version-keep-num", 0, "Num of key version kept by fsm, num must greater than -1")
+	flag.IntVar(&backupGoNum, "backup-go-num", 8, "Number of goroutine when creating snapshots")
+	flag.IntVar(&restoreGoNum, "restore-go-num", 8, "Number of goroutine when restoring from snapshots")
 }
 
 func main() {

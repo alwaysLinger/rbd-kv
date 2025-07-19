@@ -25,14 +25,16 @@ type Server struct {
 }
 
 type Options struct {
-	RaftAddr    string
-	GrpcAddr    string
-	JoinAddr    string
-	NodeID      string
-	LogDir      string
-	KVDir       string
-	BatchSize   uint64
-	VersionKeep int
+	RaftAddr     string
+	GrpcAddr     string
+	JoinAddr     string
+	NodeID       string
+	LogDir       string
+	KVDir        string
+	BatchSize    uint64
+	VersionKeep  int
+	BackupGoNum  int
+	RestoreGoNum int
 }
 
 func NewServer(opts *Options) (*Server, error) {
@@ -51,9 +53,9 @@ func NewServer(opts *Options) (*Server, error) {
 
 	var fsm storage.DBFSM
 	if opts.BatchSize > 0 {
-		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger)
+		fsm, err = storage.OpenBatchFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger, storage.WithBackupGoNum(opts.BackupGoNum), storage.WithRestoreGoNum(opts.RestoreGoNum))
 	} else {
-		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger)
+		fsm, err = storage.OpenFSM(filepath.Join(opts.KVDir, "kv"), nil, opts.VersionKeep, logger, storage.WithBackupGoNum(opts.BackupGoNum), storage.WithRestoreGoNum(opts.RestoreGoNum))
 	}
 	if err != nil {
 		return nil, err
@@ -96,6 +98,12 @@ func checkOpts(opts *Options) error {
 	}
 	if opts.VersionKeep < 0 {
 		return fmt.Errorf("%w:version keep num less then 0", ErrOptsCheckFailed)
+	}
+	if opts.BackupGoNum > 64 {
+		return fmt.Errorf("%w:bakckup goroutine num can not be greater then 64", ErrOptsCheckFailed)
+	}
+	if opts.RestoreGoNum > 64 {
+		return fmt.Errorf("%w:restore goroutine num can not be greater then 64", ErrOptsCheckFailed)
 	}
 	return nil
 }

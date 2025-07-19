@@ -67,8 +67,8 @@ func (b *BatchFSM) Close() error {
 	return b.fsm.Close()
 }
 
-func OpenBatchFSM(dir string, opts *badger.Options, versionKept int, logger log.Logger) (*BatchFSM, error) {
-	fsm, err := OpenFSM(dir, opts, versionKept, logger)
+func OpenBatchFSM(dir string, bopts *badger.Options, versionKept int, logger log.Logger, opts ...Option) (*BatchFSM, error) {
+	fsm, err := OpenFSM(dir, bopts, versionKept, logger, opts...)
 	if err != nil {
 		return nil, err
 	}

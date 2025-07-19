@@ -471,8 +471,9 @@ func (n *Node) WithRaft(raftAddr, joinAddr, logAddr string, batchSize uint64) er
 	c.HeartbeatTimeout = 2 * time.Second
 	c.ElectionTimeout = 3 * time.Second
 	c.LeaderLeaseTimeout = 1 * time.Second
-	c.SnapshotThreshold = 100000
-	c.TrailingLogs = 10000
+	c.SnapshotThreshold = 1e6
+	c.TrailingLogs = 1e5
+	c.SnapshotInterval = 30 * time.Minute
 	if batchSize > 0 {
 		c.CommitTimeout = 10 * time.Millisecond
 		c.MaxAppendEntries = int(batchSize)
