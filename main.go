@@ -39,14 +39,16 @@ func main() {
 	flag.Parse()
 
 	opts := &internal.Options{
-		RaftAddr:    raftAddr,
-		GrpcAddr:    grpcAddr,
-		JoinAddr:    joinAddr,
-		NodeID:      grpcAddr,
-		LogDir:      logDir,
-		KVDir:       kvDir,
-		BatchSize:   batchSize,
-		VersionKeep: versionKept,
+		RaftAddr:     raftAddr,
+		GrpcAddr:     grpcAddr,
+		JoinAddr:     joinAddr,
+		NodeID:       grpcAddr,
+		LogDir:       logDir,
+		KVDir:        kvDir,
+		BatchSize:    batchSize,
+		VersionKeep:  versionKept,
+		BackupGoNum:  backupGoNum,
+		RestoreGoNum: restoreGoNum,
 	}
 
 	server, err := internal.NewServer(opts)

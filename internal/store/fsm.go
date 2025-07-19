@@ -18,8 +18,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const maxKeptVersion = math.MaxInt
-
 var (
 	consistentIndexKey = []byte("m.!ci")
 
@@ -84,6 +82,7 @@ func OpenFSM(dir string, bopts *badger.Options, versionKept int, logger log.Logg
 			WithDetectConflicts(false).
 			WithBlockCacheSize(512 << 20).
 			WithValueThreshold(4 << 10).
+			WithNumVersionsToKeep(math.MaxInt).
 			WithCompression(copts.ZSTD).
 			WithNumGoroutines(s.backupGoNum).
 			WithMetricsEnabled(false).
@@ -91,10 +90,9 @@ func OpenFSM(dir string, bopts *badger.Options, versionKept int, logger log.Logg
 		bopts = &options
 	}
 
-	if versionKept == 0 {
-		versionKept = maxKeptVersion
+	if versionKept != 0 {
+		*bopts = (*bopts).WithNumVersionsToKeep(versionKept)
 	}
-	*bopts = (*bopts).WithNumVersionsToKeep(versionKept)
 
 	db, err := badger.OpenManaged(*bopts)
 	if err != nil {
