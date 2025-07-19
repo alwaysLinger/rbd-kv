@@ -51,25 +51,25 @@ implementation.
 1. **When bootstrap a cluster for the first time, you need to explicitly specify the leader peer address to join. Like
    node2 and node3 use the --join-addr flag to specify the address:**  
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9501 --raft-addr=localhost:9601 --log-dir=/tmp/node1 --kv-dir=/tmp/node1
-   --batch-size=500 --backup-go-num=8  --restore-go-num=16 
+   --batch-size=500 --backup-go-num=8 --restore-go-num=16 
 
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9502 --join-addr=localhost:9501 --raft-addr=localhost:9602 --log-dir=/tmp/node2
-   --kv-dir=/tmp/node2 --batch-size=500 --backup-go-num=8  --restore-go-num=16 
+   --kv-dir=/tmp/node2 --batch-size=500 --backup-go-num=8 --restore-go-num=16 
 
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9503 --join-addr=localhost:9501 --raft-addr=localhost:9603 --log-dir=/tmp/node3
-   --kv-dir=/tmp/node3 --batch-size=500 --backup-go-num=8  --restore-go-num=16
+   --kv-dir=/tmp/node3 --batch-size=500 --backup-go-num=8 --restore-go-num=16
 
 
 2. **Once a node has successfully joined a cluster, you don't need to specify the --join-addr flag ever again. The node
    will automatically rejoin the cluster using its stored state in any order:**  
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9501 --raft-addr=localhost:9601 --log-dir=/tmp/node1 --kv-dir=/tmp/node1 
-   --batch-size=500 --backup-go-num=8  --restore-go-num=16 
+   --batch-size=500 --backup-go-num=8 --restore-go-num=16 
 
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9502 --raft-addr=localhost:9602 --log-dir=/tmp/node2 --kv-dir=/tmp/node2 
-   --batch-size=500 --backup-go-num=8  --restore-go-num=16 
+   --batch-size=500 --backup-go-num=8 --restore-go-num=16 
 
    GOMAXPROCS=128 ./rbkv --grpc-addr=localhost:9503 --raft-addr=localhost:9603 --log-dir=/tmp/node3 --kv-dir=/tmp/node3
-   --batch-size=500 --backup-go-num=8  --restore-go-num=16
+   --batch-size=500 --backup-go-num=8 --restore-go-num=16
 
 **We need to ensure that RAFT can still work properly when there is a heavy snapshot processing being executed, so we 
 want to set reasonable values for GOMAXPROCS, backup-go-num and restore-go-num**
