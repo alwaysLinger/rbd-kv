@@ -58,6 +58,7 @@ type FSM struct {
 	db           *badger.DB
 	gcTicker     *time.Ticker
 	appliedIndex uint64 // this field will never be accessed concurrently
+	throttle     uint64
 	logger       log.Logger
 	oracle       oracle
 	txn          Txn[*badger.Item]
@@ -70,9 +71,11 @@ func OpenFSM(dir string, bopts *badger.Options, versionKept int, logger log.Logg
 		dir = os.TempDir()
 	}
 
-	s := new(FSM)
-	s.backupGoNum = 8
-	s.restoreGoNum = 8
+	s := &FSM{
+		throttle:     300,
+		backupGoNum:  8,
+		restoreGoNum: 8,
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -190,6 +193,9 @@ func uint64ToBytes(u uint64) []byte {
 }
 
 func (s *FSM) apply(log *raft.Log) any {
+	if log.Index%s.throttle == 0 {
+		runtime.Gosched()
+	}
 	if s.appliedIndex >= log.Index {
 		return nil
 	}
@@ -242,7 +248,7 @@ func (s *FSM) Restore(snapshot io.ReadCloser) error {
 	}
 	r := &yieldReader{
 		snapshot:   snapshot,
-		throughput: 300,
+		throughput: 1000,
 		it:         0,
 	}
 	if err := s.db.Load(r, s.restoreGoNum); err != nil {

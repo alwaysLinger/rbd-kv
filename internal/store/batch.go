@@ -90,7 +90,7 @@ func (wb *writeBatch) Flush(b *batch) []any {
 
 func newWriteBatch(db *badger.DB, oracle oracle, onUpdate func(ts uint64, wb *badger.WriteBatch) error) *writeBatch {
 	return &writeBatch{
-		throughput: 300,
+		throughput: 10,
 		db:         db,
 		oracle:     oracle,
 		pool: NewPool[*batchItem](func() *batchItem {
